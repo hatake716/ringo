@@ -16,11 +16,14 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.core.content.ContextCompat
 import androidx.core.content.edit
 import io.github.hatake716.ohagi.data.AppRef
 import io.github.hatake716.ohagi.ui.HomeScreen
 import io.github.hatake716.ohagi.ui.common.LocalDeviceUprightRotation
+import io.github.hatake716.ohagi.ui.common.LocalGlassAppearance
+import io.github.hatake716.ohagi.ui.common.rememberGlassAppearance
 import io.github.hatake716.ohagi.ui.common.PortraitStage
 import io.github.hatake716.ohagi.ui.common.rememberDeviceUprightRotation
 import io.github.hatake716.ohagi.ui.theme.OhagiTheme
@@ -57,14 +60,19 @@ class MainActivity : ComponentActivity() {
         restorePendingWidget(savedInstanceState, graph)
         restorePendingAppLaunch(savedInstanceState)
         setContent {
-            OhagiTheme {
+            val appearanceReady by graph.appearanceRepository.loaded.collectAsStateWithLifecycle()
+            val mode by graph.appearanceRepository.themeMode.collectAsStateWithLifecycle()
+            if (!appearanceReady) return@setContent
+            OhagiTheme(mode = mode) {
                 // Activity は回転を許可する(マウス等の入力系は OS が横向きとして扱う)。
                 // ただしホームのレイアウトは回さない: PortraitStage が UI 全体を
                 // 縦向き配置のまま横画面へ回して描き、アイコン/名称だけが直立へ追従する。
                 val uprightRotation by rememberDeviceUprightRotation()
+                val glassAppearance = rememberGlassAppearance(graph.appearanceRepository)
                 CompositionLocalProvider(
                     LocalGraph provides graph,
                     LocalDeviceUprightRotation provides uprightRotation,
+                    LocalGlassAppearance provides glassAppearance,
                 ) {
                     PortraitStage {
                         HomeScreen(

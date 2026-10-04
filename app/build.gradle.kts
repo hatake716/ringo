@@ -62,6 +62,13 @@ android {
     }
 }
 
+composeCompiler {
+    // 変更されないモデル/コレクションを equals で比較させる(docs/PERFORMANCE.md)。
+    // このファイルの編集はKotlinコンパイルのup-to-date判定に入らないため、
+    // 編集後は :app:compileReleaseKotlin --rerun などで再コンパイルする。
+    stabilityConfigurationFiles.add(layout.projectDirectory.file("compose-stability.conf"))
+}
+
 kotlin {
     compilerOptions {
         jvmTarget.set(JvmTarget.JVM_17)

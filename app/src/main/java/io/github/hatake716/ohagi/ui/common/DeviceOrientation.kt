@@ -9,10 +9,13 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.State
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
@@ -28,6 +31,17 @@ import androidx.compose.ui.platform.LocalView
  * その中でアイコンや名称だけがこの補正角([uprightWithDevice])で直立する。
  */
 val LocalDeviceUprightRotation = compositionLocalOf { 0f }
+
+/**
+ * [LocalDeviceUprightRotation] へスプリングで追従する表示用の角度。
+ * [PortraitStage] が1つだけ作って配り、各セルは描画フェーズでだけ読む。
+ * 提供されていない画面(PortraitStage の外や縦画面)では常に 0。
+ */
+val LocalAnimatedUprightRotation = staticCompositionLocalOf<State<Float>> { NoUprightRotation }
+
+private object NoUprightRotation : State<Float> {
+    override val value: Float get() = 0f
+}
 
 /**
  * 表示回転(Display.rotation)から直立補正角を求める。
@@ -64,35 +78,48 @@ fun PortraitStage(content: @Composable () -> Unit) {
         content()
         return
     }
-    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-        Box(
-            modifier = Modifier
-                .requiredSize(width = maxHeight, height = maxWidth)
-                .align(Alignment.Center)
-                .graphicsLayer { rotationZ = -upright },
-        ) {
-            content()
-        }
-    }
-}
-
-/** [LocalDeviceUprightRotation] へスプリングで追従する表示用の角度。 */
-@Composable
-fun animatedUprightRotation(): Float = rememberAnimatedUprightRotation().value
-
-/** レイアウトを変えない回転では、StateをgraphicsLayerから直接読む。 */
-@Composable
-internal fun rememberAnimatedUprightRotation(): State<Float> {
-    val target = LocalDeviceUprightRotation.current
-    return animateFloatAsState(
-        targetValue = target,
+    // 縦⇔横の切替では上の分岐と別の場所で content が作り直されるため、角度の補間は
+    // この分岐の中に置く(従来どおり横⇔逆横の反転だけがアニメーションする)。
+    val animatedUpright = animateFloatAsState(
+        targetValue = upright,
         animationSpec = spring(
             dampingRatio = Spring.DampingRatioLowBouncy,
             stiffness = Spring.StiffnessMediumLow,
         ),
         label = "uprightRotation",
     )
+    CompositionLocalProvider(LocalAnimatedUprightRotation provides animatedUpright) {
+        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+            Box(
+                modifier = Modifier
+                    .requiredSize(width = maxHeight, height = maxWidth)
+                    .align(Alignment.Center)
+                    .graphicsLayer { rotationZ = -upright },
+            ) {
+                content()
+            }
+        }
+    }
 }
+
+/**
+ * 共有の直立補正角の現在値。composition で読むため、呼び出し元はアニメーション中
+ * 毎フレーム再構成される。レイアウトに関係しない用途は [animatedUprightRotationState] を
+ * 描画フェーズで読むこと。
+ */
+@Composable
+@ReadOnlyComposable
+fun animatedUprightRotation(): Float = LocalAnimatedUprightRotation.current.value
+
+/** 共有の直立補正角の State。graphicsLayer 等の描画フェーズで value を読む。 */
+@Composable
+@ReadOnlyComposable
+fun animatedUprightRotationState(): State<Float> = LocalAnimatedUprightRotation.current
+
+/** 旧名。[animatedUprightRotationState] と同じ共有 State を返す(新たに状態は作らない)。 */
+@Composable
+@ReadOnlyComposable
+internal fun rememberAnimatedUprightRotation(): State<Float> = LocalAnimatedUprightRotation.current
 
 /**
  * アイコン+名称のブロックを端末の向きへ合わせて立て直す。
@@ -100,6 +127,6 @@ internal fun rememberAnimatedUprightRotation(): State<Float> {
  */
 @Composable
 fun Modifier.uprightWithDevice(): Modifier {
-    val rotation = rememberAnimatedUprightRotation()
+    val rotation = LocalAnimatedUprightRotation.current
     return graphicsLayer { rotationZ = rotation.value }
 }

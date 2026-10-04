@@ -2,13 +2,16 @@ package io.github.hatake716.ohagi.ui.widget
 
 import android.appwidget.AppWidgetHostView
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -29,9 +32,10 @@ import androidx.compose.material.icons.rounded.KeyboardArrowUp
 import androidx.compose.material.icons.rounded.Remove
 import androidx.compose.material.icons.rounded.Widgets
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -42,23 +46,35 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import io.github.hatake716.ohagi.LocalGraph
 import io.github.hatake716.ohagi.R
 import io.github.hatake716.ohagi.data.WidgetPlacement
-import io.github.hatake716.ohagi.ui.common.IOS_SELECTION_BLUE
-import io.github.hatake716.ohagi.ui.common.IosGlassIconButton
-import io.github.hatake716.ohagi.ui.theme.Ink
-import io.github.hatake716.ohagi.ui.theme.Kome
+import io.github.hatake716.ohagi.ui.common.ContinuousRoundedShape
+import io.github.hatake716.ohagi.ui.common.GlassContentColor
+import io.github.hatake716.ohagi.ui.common.GlassSecondaryContentColor
+import io.github.hatake716.ohagi.ui.common.GlassTone
+import io.github.hatake716.ohagi.ui.common.IosDestructiveRed
+import io.github.hatake716.ohagi.ui.common.IosSystemBlue
+import io.github.hatake716.ohagi.ui.common.liquidGlass
+import io.github.hatake716.ohagi.ui.common.wallpaperPageBackdrop
+import io.github.hatake716.ohagi.ui.theme.LocalOhagiColors
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
@@ -76,7 +92,7 @@ fun WidgetPage(
     Column(
         modifier = modifier
             .fillMaxSize()
-            .background(Ink.copy(alpha = 0.18f))
+            .wallpaperPageBackdrop()
             .statusBarsPadding()
             .navigationBarsPadding(),
     ) {
@@ -84,28 +100,24 @@ fun WidgetPage(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = 20.dp, end = 12.dp, top = 10.dp, bottom = 8.dp),
+                .padding(start = 20.dp, end = 16.dp, top = 10.dp, bottom = 10.dp),
         ) {
             Text(
                 text = stringResource(R.string.widget_page_title),
-                color = Kome,
+                color = GlassContentColor,
+                fontSize = 28.sp,
+                lineHeight = 34.sp,
+                letterSpacing = 0.sp,
                 fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
-            if (widgets.isNotEmpty()) {
-                TextButton(onClick = { editing = !editing }) {
-                    Text(
-                        text = stringResource(
-                            if (editing) R.string.action_done else R.string.folder_edit,
-                        ),
-                        color = IOS_SELECTION_BLUE,
-                    )
-                }
-            }
-            IosGlassIconButton(
-                imageVector = Icons.Rounded.Add,
-                contentDescription = stringResource(R.string.widget_add),
-                onClick = onAddWidget,
+            WidgetHeaderActions(
+                showEdit = widgets.isNotEmpty(),
+                editing = editing,
+                onToggleEditing = { editing = !editing },
+                onAddWidget = onAddWidget,
             )
         }
 
@@ -143,6 +155,96 @@ fun WidgetPage(
     }
 }
 
+/**
+ * iOS 26 のツールバーと同じく、関連する操作を1枚のガラスのカプセルにまとめる。
+ * ウィジェットが無いときは「+」だけの丸いガラスになる。
+ */
+@Composable
+private fun WidgetHeaderActions(
+    showEdit: Boolean,
+    editing: Boolean,
+    onToggleEditing: () -> Unit,
+    onAddWidget: () -> Unit,
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .height(GLASS_BUTTON_SIZE)
+            .liquidGlass(CapsuleShape, GlassTone.Regular, highlight = 0.85f),
+    ) {
+        if (showEdit) {
+            GlassPressable(
+                onClick = onToggleEditing,
+                modifier = Modifier.fillMaxHeight(),
+            ) {
+                Text(
+                    text = stringResource(
+                        if (editing) R.string.action_done else R.string.folder_edit,
+                    ),
+                    color = if (editing) IosSystemBlue else GlassContentColor,
+                    fontSize = 16.sp,
+                    letterSpacing = 0.sp,
+                    fontWeight = if (editing) FontWeight.SemiBold else FontWeight.Medium,
+                    maxLines = 1,
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                )
+            }
+        }
+        GlassPressable(
+            onClick = onAddWidget,
+            contentDescription = stringResource(R.string.widget_add),
+            modifier = Modifier.size(GLASS_BUTTON_SIZE),
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.Add,
+                contentDescription = null,
+                tint = GlassContentColor,
+                modifier = Modifier.size(22.dp),
+            )
+        }
+    }
+}
+
+/**
+ * ガラス面の上に置く押下領域。押下中は白い光をカプセル形に重ねる。
+ * 押下状態は描画フェーズでだけ読み、再compositionもレイヤーも増やさない。
+ */
+@Composable
+private fun GlassPressable(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    contentDescription: String? = null,
+    content: @Composable () -> Unit,
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressed = interactionSource.collectIsPressedAsState()
+    val pressedHighlight = LocalOhagiColors.current.pressedFill
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = modifier
+            .drawBehind {
+                if (pressed.value) {
+                    val radius = size.minDimension / 2f
+                    drawRoundRect(
+                        color = pressedHighlight,
+                        cornerRadius = CornerRadius(radius, radius),
+                    )
+                }
+            }
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                role = Role.Button,
+                onClick = onClick,
+            )
+            .semantics {
+                if (contentDescription != null) this.contentDescription = contentDescription
+            },
+    ) {
+        content()
+    }
+}
+
 @Composable
 private fun EmptyWidgetPage(
     onAddWidget: () -> Unit,
@@ -153,38 +255,49 @@ private fun EmptyWidgetPage(
             horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier
                 .padding(28.dp)
-                .clip(RoundedCornerShape(30.dp))
-                .background(Color.White.copy(alpha = 0.10f))
-                .border(
-                    width = 0.5.dp,
-                    color = Color.White.copy(alpha = 0.18f),
-                    shape = RoundedCornerShape(30.dp),
-                )
+                .liquidGlass(EmptyCardShape, GlassTone.Regular)
                 .padding(horizontal = 28.dp, vertical = 34.dp),
         ) {
             Icon(
                 imageVector = Icons.Rounded.Widgets,
                 contentDescription = null,
-                tint = Kome,
+                tint = GlassContentColor,
                 modifier = Modifier.size(52.dp),
             )
             Spacer(Modifier.height(14.dp))
             Text(
                 text = stringResource(R.string.widget_empty_title),
-                color = Kome,
+                color = GlassContentColor,
+                fontSize = 17.sp,
+                letterSpacing = 0.sp,
                 fontWeight = FontWeight.SemiBold,
             )
             Spacer(Modifier.height(6.dp))
             Text(
                 text = stringResource(R.string.widget_empty_body),
-                color = Kome.copy(alpha = 0.68f),
+                color = GlassSecondaryContentColor,
+                fontSize = 15.sp,
+                lineHeight = 20.sp,
+                letterSpacing = 0.sp,
+                textAlign = TextAlign.Center,
             )
             Spacer(Modifier.height(18.dp))
-            IosGlassIconButton(
-                imageVector = Icons.Rounded.Add,
-                contentDescription = stringResource(R.string.widget_add),
+            // ガラスの上にガラスを重ねず、iOS の「強調ボタン」と同じ着色したガラスにする。
+            GlassPressable(
                 onClick = onAddWidget,
-            )
+                contentDescription = stringResource(R.string.widget_add),
+                modifier = Modifier
+                    .size(GLASS_BUTTON_SIZE)
+                    .background(PROMINENT_CONTROL_BACKING, CircleShape)
+                    .liquidGlass(CircleShape, accent = IosSystemBlue, highlight = 0.9f),
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.Add,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(22.dp),
+                )
+            }
         }
     }
 }
@@ -205,8 +318,8 @@ private fun HostedWidgetCard(
     val info = remember(placement.appWidgetId) {
         controller.appWidgetInfo(placement.appWidgetId)
     }
-    val label = remember(info, placement.providerPackage) {
-        info?.let(controller::providerLabel) ?: placement.providerPackage
+    val providerMatches = remember(info, placement.providerPackage, placement.providerClass) {
+        info != null && info.provider == controller.componentOf(placement)
     }
     val density = LocalDensity.current
     var availableWidthPx by remember { mutableIntStateOf(0) }
@@ -295,19 +408,16 @@ private fun HostedWidgetCard(
         Box(
             modifier = cardWidthModifier
                 .height(displayedHeightDp.dp)
-                .clip(RoundedCornerShape(26.dp))
-                .background(Color.White.copy(alpha = 0.10f))
-                .border(
-                    width = 0.5.dp,
-                    color = Color.White.copy(alpha = 0.20f),
-                    shape = RoundedCornerShape(26.dp),
-                ),
+                .liquidGlass(WidgetCardGlassShape, GlassTone.Regular)
+                // AppWidgetHostView を含むため、クリップは RenderNode の輪郭で扱える
+                // 円弧の角丸のままにする(ガラスの面だけ連続曲率で描く)。
+                .clip(WidgetCardClipShape),
         ) {
-            if (info == null || info.provider != controller.componentOf(placement)) {
+            if (info == null || !providerMatches) {
                 Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
                     Text(
                         text = stringResource(R.string.widget_unavailable),
-                        color = Kome.copy(alpha = 0.65f),
+                        color = GlassSecondaryContentColor,
                     )
                 }
             } else {
@@ -321,6 +431,11 @@ private fun HostedWidgetCard(
             }
 
             if (editing) {
+                // 名前は編集操作の読み上げにだけ使うため、編集中にだけ読む。
+                val label = remember(placement.appWidgetId, info, placement.providerPackage) {
+                    info?.let { controller.widgetLabel(placement.appWidgetId, it) }
+                        ?: placement.providerPackage
+                }
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     modifier = Modifier
@@ -350,19 +465,15 @@ private fun HostedWidgetCard(
                 }
 
                 if (canResizeHorizontally || canResizeVertically) {
-                    Text(
+                    WidgetEditLabel(
                         text = stringResource(
                             R.string.widget_size_value,
                             displayedWidthDp,
                             displayedHeightDp,
                         ),
-                        color = Color.White,
                         modifier = Modifier
                             .align(Alignment.BottomStart)
-                            .padding(10.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(Color(0xCC2C2C2E))
-                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                            .padding(10.dp),
                     )
                     WidgetResizeHandle(
                         contentDescription = stringResource(R.string.widget_resize, label),
@@ -410,15 +521,11 @@ private fun HostedWidgetCard(
                             .padding(8.dp),
                     )
                 } else {
-                    Text(
+                    WidgetEditLabel(
                         text = stringResource(R.string.widget_resize_unavailable),
-                        color = Color.White,
                         modifier = Modifier
                             .align(Alignment.BottomStart)
-                            .padding(10.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(Color(0xCC2C2C2E))
-                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                            .padding(10.dp),
                     )
                 }
             }
@@ -460,8 +567,8 @@ private fun WidgetResizeHandle(
         contentAlignment = Alignment.Center,
         modifier = modifier
             .size(44.dp)
-            .clip(CircleShape)
-            .background(IOS_SELECTION_BLUE)
+            .background(PROMINENT_CONTROL_BACKING, CircleShape)
+            .liquidGlass(CircleShape, accent = IosSystemBlue, highlight = 0.9f)
             .semantics { this.contentDescription = contentDescription }
             .pointerInput(
                 canResizeHorizontally,
@@ -560,29 +667,67 @@ private fun snapWidgetSize(valueDp: Int, minDp: Int, maxDp: Int): Int {
     return snapped.coerceIn(minDp, maxDp)
 }
 
+/**
+ * 編集モードの操作部品。ウィジェットの中身(白い背景のことも多い)の上に載るため、
+ * 透明度設定が「クリア」でも記号が読めるよう、ガラスの下に暗い下地を敷く
+ * ([WidgetEditLabel] も同じ)。
+ */
 @Composable
 private fun WidgetEditButton(
-    imageVector: androidx.compose.ui.graphics.vector.ImageVector,
+    imageVector: ImageVector,
     contentDescription: String,
     onClick: () -> Unit,
     destructive: Boolean = false,
 ) {
-    val background = if (destructive) Color(0xFFE84646) else Color(0xCC2C2C2E)
-    androidx.compose.material3.IconButton(
+    IconButton(
         onClick = onClick,
         modifier = Modifier
             .size(34.dp)
-            .clip(CircleShape)
-            .background(background),
+            .background(
+                color = if (destructive) DESTRUCTIVE_CONTROL_BACKING else EDIT_CONTROL_BACKING,
+                shape = CircleShape,
+            )
+            .liquidGlass(
+                shape = CircleShape,
+                accent = if (destructive) IosDestructiveRed else null,
+                highlight = 0.75f,
+            ),
     ) {
         Icon(
             imageVector = imageVector,
             contentDescription = contentDescription,
-            tint = Color.White,
+            tint = if (destructive) Color.White else GlassContentColor,
             modifier = Modifier.size(20.dp),
         )
     }
 }
+
+@Composable
+private fun WidgetEditLabel(
+    text: String,
+    modifier: Modifier = Modifier,
+) {
+    Text(
+        text = text,
+        color = GlassContentColor,
+        fontSize = 14.sp,
+        letterSpacing = 0.sp,
+        modifier = modifier
+            .background(EDIT_CONTROL_BACKING, CapsuleShape)
+            .liquidGlass(CapsuleShape, highlight = 0.6f)
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+    )
+}
+
+private val GLASS_BUTTON_SIZE = 42.dp
+private val CapsuleShape = RoundedCornerShape(50)
+private val EmptyCardShape = ContinuousRoundedShape(30.dp)
+private val WidgetCardGlassShape = ContinuousRoundedShape(26.dp)
+private val WidgetCardClipShape = RoundedCornerShape(26.dp)
+private val EDIT_CONTROL_BACKING: Color
+    @Composable @ReadOnlyComposable get() = LocalOhagiColors.current.glassBase.copy(alpha = 0.94f)
+private val DESTRUCTIVE_CONTROL_BACKING = Color(0xFFB42318)
+private val PROMINENT_CONTROL_BACKING = Color(0xFF005AC1)
 
 private const val WIDGET_SIZE_STEP_DP = 8
 private const val FULL_WIDTH_SNAP_TOLERANCE_DP = 4

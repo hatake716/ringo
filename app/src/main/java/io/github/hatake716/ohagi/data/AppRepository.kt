@@ -15,9 +15,14 @@ import android.os.SystemClock
 import android.util.Log
 import android.util.LruCache
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.asAndroidPath
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.core.graphics.createBitmap
+import io.github.hatake716.ohagi.ui.common.IOS_ICON_CORNER_RATIO
+import io.github.hatake716.ohagi.ui.common.addContinuousRoundedRect
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -32,6 +37,7 @@ import kotlinx.coroutines.withContext
 import java.text.Collator
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
+import kotlin.math.max
 
 /** ドロワー表示用のアプリ情報 */
 data class AppInfo(
@@ -325,12 +331,15 @@ class AppRepository(private val context: Context) {
     }
 
     /**
-     * アイコンを iPhone 風の角丸矩形にレンダリングする。
+     * アイコンを iOS の連続曲率の角丸(squircle)にレンダリングする。
      *
      * アダプティブアイコンは OS がそのまま描くと端末の形状マスク(Pixel は円形)が
-     * 適用され、四隅が透明になってしまう。そこで前景+背景を自前で角丸矩形キャンバスに
+     * 適用され、四隅が透明になってしまう。そこで前景+背景を自前で正方形キャンバスに
      * 描き、円形マスクを回避して統一された角丸にする。
-     * レガシー(非アダプティブ)アイコンは元のビットマップを角丸クリップで整える。
+     *
+     * マスクと Liquid Glass の光の縁はここでビットマップへ焼き込み、表示側では
+     * clip/border のレイヤーや描画命令を持たない。形状は iosIconShape と同じ
+     * addContinuousRoundedRect の幾何を使い、影・ドラッグ装飾の輪郭と一致させる。
      */
     private fun renderRoundedIcon(
         drawable: Drawable,
@@ -338,15 +347,11 @@ class AppRepository(private val context: Context) {
     ): android.graphics.Bitmap {
         val bitmap = createBitmap(size, size, android.graphics.Bitmap.Config.ARGB_8888)
         val canvas = android.graphics.Canvas(bitmap)
-        val radius = size * ICON_CORNER_RATIO
-        val clip = android.graphics.Path().apply {
-            addRoundRect(
-                android.graphics.RectF(0f, 0f, size.toFloat(), size.toFloat()),
-                radius, radius, android.graphics.Path.Direction.CW,
-            )
-        }
-        canvas.clipPath(clip)
+        val side = size.toFloat()
+        val radius = side * ICON_CORNER_RATIO
 
+        // 透過部分のあるレガシーアイコンも、壁紙が素通しにならないよう淡い面に載せる。
+        canvas.drawColor(ICON_BACKING_ARGB)
         if (drawable is android.graphics.drawable.AdaptiveIconDrawable) {
             // アダプティブアイコンの前景/背景は本来セーフゾーンより 1/9 ずつ外へはみ出す。
             // キャンバスより一回り大きい bounds を与えて中央のセーフゾーンが枠に収まるようにする。
@@ -357,6 +362,43 @@ class AppRepository(private val context: Context) {
         } else {
             drawable.setBounds(0, 0, size, size)
             drawable.draw(canvas)
+        }
+
+        // ソフトウェアCanvasの clipPath は縁がギザつくため、全面に描いてから
+        // マスクの外側だけを AA 付きの CLEAR で消し、縁をなめらかにする。
+        val outside = Path().apply { addContinuousRoundedRect(side, side, radius) }
+            .asAndroidPath()
+        outside.fillType = android.graphics.Path.FillType.INVERSE_WINDING
+        canvas.drawPath(
+            outside,
+            android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                xfermode = android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.CLEAR)
+            },
+        )
+
+        // Liquid Glass のスペキュラの縁。左上を最も明るく、右下を反射として少し明るくする。
+        // 外周の AA 画素へ白がはみ出さないよう、線幅の半分より少しだけ内側に置く。
+        val rimWidth = max(1f, side * ICON_RIM_WIDTH_RATIO)
+        val inset = rimWidth / 2f + ICON_RIM_EXTRA_INSET_PX
+        val innerSide = side - inset * 2f
+        if (innerSide > 0f) {
+            val rim = Path().apply {
+                addContinuousRoundedRect(innerSide, innerSide, (radius - inset).coerceAtLeast(0f))
+                translate(Offset(inset, inset))
+            }.asAndroidPath()
+            canvas.drawPath(
+                rim,
+                android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                    style = android.graphics.Paint.Style.STROKE
+                    strokeWidth = rimWidth
+                    shader = android.graphics.LinearGradient(
+                        0f, 0f, side, side,
+                        ICON_RIM_COLORS,
+                        ICON_RIM_STOPS,
+                        android.graphics.Shader.TileMode.CLAMP,
+                    )
+                },
+            )
         }
         return bitmap
     }
@@ -375,8 +417,13 @@ class AppRepository(private val context: Context) {
         const val ICON_LOAD_PARALLELISM = 2
         const val LOW_RAM_ICON_LOAD_PARALLELISM = 1
         const val FOREGROUND_REFRESH_INTERVAL_MS = 15_000L
-        // AppIcon 側の角丸比率(size*0.2237f)と揃える。
-        const val ICON_CORNER_RATIO = 0.2237f
+        // 表示側の iosIconShape と同じ比率でなければ、焼き込んだ縁と影がずれる。
+        const val ICON_CORNER_RATIO = IOS_ICON_CORNER_RATIO
+        const val ICON_BACKING_ARGB = 0x24FFFFFF
+        const val ICON_RIM_WIDTH_RATIO = 0.013f
+        const val ICON_RIM_EXTRA_INSET_PX = 0.5f
+        val ICON_RIM_COLORS = intArrayOf(0x61FFFFFF, 0x14FFFFFF, 0x0DFFFFFF, 0x2EFFFFFF)
+        val ICON_RIM_STOPS = floatArrayOf(0f, 0.3f, 0.7f, 1f)
         const val TAG = "AppRepository"
     }
 }

@@ -1,7 +1,6 @@
 package io.github.hatake716.ohagi.ui.common
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -13,10 +12,9 @@ import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.ArrowBackIosNew
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -25,18 +23,21 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.hatake716.ohagi.LocalGraph
 import io.github.hatake716.ohagi.R
 import io.github.hatake716.ohagi.data.AppCategory
 import io.github.hatake716.ohagi.data.AppRef
 import io.github.hatake716.ohagi.data.preferredAppRefs
-import io.github.hatake716.ohagi.ui.theme.Ink
-import io.github.hatake716.ohagi.ui.theme.Kome
+import io.github.hatake716.ohagi.ui.theme.LocalOhagiColors
 
 /** 通知のohagiボタンから開く、2つ目のアプリ専用カテゴリー式ドロワー。 */
 @Composable
@@ -69,6 +70,9 @@ fun SplitAppPickerScreen(
     }
     val headerTitle = selectedCategory?.let { appCategoryTitle(it) }
         ?: stringResource(R.string.picker_split_second_title)
+    val appearance = LocalGlassAppearance.current
+    val colors = LocalOhagiColors.current
+    val searchFocus = rememberSearchFieldFocusReleaser(query)
 
     BackHandler {
         if (selectedCategory != null) selectedCategory = null else onDismiss()
@@ -77,36 +81,50 @@ fun SplitAppPickerScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Ink)
+            // この画面は壁紙を透かさない不透明ウィンドウなので、壁紙の主色を上端に
+            // 薄く敷いてガラスのカードに映り込む色を作る。色は描画フェーズで読む。
+            .drawWithCache {
+                val top = lerp(colors.backdrop, appearance.wallpaperTint, if (colors.isDark) SPLIT_BACKDROP_TINT else 0.06f)
+                val brush = Brush.verticalGradient(
+                    0f to top,
+                    0.6f to colors.backdrop,
+                    startY = 0f,
+                    endY = size.height,
+                )
+                onDrawBehind { drawRect(brush) }
+            }
             .safeDrawingPadding(),
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = 20.dp, end = 8.dp, top = 8.dp, bottom = 4.dp),
+                .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 4.dp),
         ) {
             if (selectedCategory != null) {
                 IosGlassIconButton(
-                    imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
+                    imageVector = Icons.Rounded.ArrowBackIosNew,
                     contentDescription = stringResource(R.string.category_back),
                     onClick = { selectedCategory = null },
+                    size = 40.dp,
                 )
-                Spacer(Modifier.width(8.dp))
+                Spacer(Modifier.width(12.dp))
+            } else {
+                Spacer(Modifier.width(4.dp))
             }
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = headerTitle,
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.SemiBold,
-                    color = Kome,
+                    fontSize = 22.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = GlassContentColor,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
                     text = stringResource(R.string.picker_split_first_app, firstLabel),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = Kome.copy(alpha = 0.62f),
+                    fontSize = 13.sp,
+                    color = GlassSecondaryContentColor,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -115,6 +133,7 @@ fun SplitAppPickerScreen(
                 imageVector = Icons.Rounded.Close,
                 contentDescription = stringResource(R.string.action_close),
                 onClick = onDismiss,
+                size = 40.dp,
             )
         }
 
@@ -128,7 +147,8 @@ fun SplitAppPickerScreen(
             clearContentDescription = stringResource(R.string.action_clear_search),
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 8.dp),
+                .padding(horizontal = 20.dp, vertical = 8.dp)
+                .then(searchFocus.modifier),
         )
 
         if (apps.isEmpty()) {
@@ -139,7 +159,7 @@ fun SplitAppPickerScreen(
                     .weight(1f),
             ) {
                 CircularProgressIndicator(
-                    color = Kome,
+                    color = GlassContentColor,
                     modifier = Modifier.size(36.dp),
                 )
             }
@@ -148,7 +168,10 @@ fun SplitAppPickerScreen(
                 apps = availableApps,
                 query = query,
                 selectedCategory = selectedCategory,
-                onCategorySelected = { selectedCategory = it },
+                onCategorySelected = {
+                    selectedCategory = it
+                    if (it != null) searchFocus.release()
+                },
                 onPreviewAppClick = { app, _ -> onSelectApp(app.ref) },
                 frequentApps = rankedLaunches,
                 preferredApps = preferredApps,
@@ -165,3 +188,6 @@ fun SplitAppPickerScreen(
         }
     }
 }
+
+/** 上端に混ぜる壁紙の主色の割合。 */
+private const val SPLIT_BACKDROP_TINT = 0.32f

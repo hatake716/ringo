@@ -1,0 +1,79 @@
+# ohagi app code baseline profile (human readable ART profile rules).
+# AGP merges this with the Compose / AndroidX library profiles, expands the wildcards
+# against the compiled classes, rewrites them through R8 and ships the result as
+# assets/dexopt/baseline.prof. androidx.profileinstaller installs it after sideload;
+# Play installs it with the APK.
+#
+# Paths covered: process start (Application / Graph / repositories), first home frame
+# (MainActivity, HomeScreen, HomeGrid, Dock, icons), page swipes, folder open/close and
+# the App Library page. Rarely used screens (widget picker, split picker, file pin
+# pickers, rename dialogs) are intentionally left to JIT.
+#
+# H = hot, S = startup, P = post-startup. ** matches any class or member.
+
+# ---- process start / DI ----
+HSPLio/github/hatake716/ohagi/OhagiApp;->**(**)**
+HSPLio/github/hatake716/ohagi/Graph;->**(**)**
+HSPLio/github/hatake716/ohagi/Graph$*;->**(**)**
+HSPLio/github/hatake716/ohagi/GraphKt;->**(**)**
+HSPLio/github/hatake716/ohagi/MainActivity;->**(**)**
+HSPLio/github/hatake716/ohagi/MainActivity$*;->**(**)**
+
+# ---- data layer: layout / usage DataStore, app list, icon cache, categories ----
+HSPLio/github/hatake716/ohagi/data/**;->**(**)**
+
+# ---- home screen, pager, grid, dock, D&D, folder overlay, App Library ----
+HSPLio/github/hatake716/ohagi/ui/HomeScreenKt;->**(**)**
+HSPLio/github/hatake716/ohagi/ui/HomeScreenKt$*;->**(**)**
+HSPLio/github/hatake716/ohagi/ui/Overlay*;->**(**)**
+HSPLio/github/hatake716/ohagi/ui/ComposableSingletons$HomeScreenKt*;->**(**)**
+HSPLio/github/hatake716/ohagi/ui/home/**;->**(**)**
+HSPLio/github/hatake716/ohagi/ui/dock/**;->**(**)**
+HSPLio/github/hatake716/ohagi/ui/dragdrop/**;->**(**)**
+HSPLio/github/hatake716/ohagi/ui/folder/**;->**(**)**
+HSPLio/github/hatake716/ohagi/ui/drawer/**;->**(**)**
+HSPLio/github/hatake716/ohagi/ui/theme/**;->**(**)**
+HSPLio/github/hatake716/ohagi/ui/widget/WidgetPageKt*;->**(**)**
+HSPLio/github/hatake716/ohagi/ui/common/AppIconKt*;->**(**)**
+HSPLio/github/hatake716/ohagi/ui/common/AppBrowser*;->**(**)**
+HSPLio/github/hatake716/ohagi/ui/common/AppLibraryPrefetch*;->**(**)**
+HSPLio/github/hatake716/ohagi/ui/common/CategorizedAppBrowserKt*;->**(**)**
+HSPLio/github/hatake716/ohagi/ui/common/ComposableSingletons$CategorizedAppBrowserKt*;->**(**)**
+HSPLio/github/hatake716/ohagi/ui/common/DeviceOrientationKt*;->**(**)**
+HSPLio/github/hatake716/ohagi/ui/common/FilePinIconKt*;->**(**)**
+HSPLio/github/hatake716/ohagi/ui/common/IosDragVisualState;->**(**)**
+HSPLio/github/hatake716/ohagi/ui/common/IosFolderIconKt*;->**(**)**
+HSPLio/github/hatake716/ohagi/ui/common/IosMotion*;->**(**)**
+HSPLio/github/hatake716/ohagi/ui/common/IosStyleKt*;->**(**)**
+# Glass surfaces drawn on the home screen, Dock and folders. Rules for classes that do
+# not exist in a given build are ignored by the wildcard expansion.
+HSPLio/github/hatake716/ohagi/ui/common/LiquidGlassKt*;->**(**)**
+HSPLio/github/hatake716/ohagi/ui/common/GlassAppearance*;->**(**)**
+HSPLio/github/hatake716/ohagi/ui/common/ContinuousRoundedShape*;->**(**)**
+
+# ---- launch path, thumbnails, widget host ----
+HSPLio/github/hatake716/ohagi/util/AppLaunchRequest*;->**(**)**
+HSPLio/github/hatake716/ohagi/util/LaunchBounds*;->**(**)**
+HSPLio/github/hatake716/ohagi/util/LaunchUtils;->**(**)**
+HSPLio/github/hatake716/ohagi/util/SplitLaunchNotification;->**(**)**
+HSPLio/github/hatake716/ohagi/util/Thumbnail*;->**(**)**
+HSPLio/github/hatake716/ohagi/util/FilePinUtils*;->**(**)**
+HSPLio/github/hatake716/ohagi/widget/WidgetHostController*;->**(**)**
+
+# ---- classes to preload into the app image at startup ----
+Lio/github/hatake716/ohagi/OhagiApp;
+Lio/github/hatake716/ohagi/Graph;
+Lio/github/hatake716/ohagi/MainActivity;
+Lio/github/hatake716/ohagi/data/**;
+Lio/github/hatake716/ohagi/ui/HomeScreenKt**;
+Lio/github/hatake716/ohagi/ui/Overlay**;
+Lio/github/hatake716/ohagi/ui/home/**;
+Lio/github/hatake716/ohagi/ui/dock/**;
+Lio/github/hatake716/ohagi/ui/dragdrop/**;
+Lio/github/hatake716/ohagi/ui/theme/**;
+Lio/github/hatake716/ohagi/ui/common/AppIconKt**;
+Lio/github/hatake716/ohagi/ui/common/DeviceOrientationKt**;
+Lio/github/hatake716/ohagi/ui/common/IosMotion**;
+Lio/github/hatake716/ohagi/ui/common/IosStyleKt**;
+Lio/github/hatake716/ohagi/ui/common/LiquidGlassKt**;
+Lio/github/hatake716/ohagi/widget/WidgetHostController**;

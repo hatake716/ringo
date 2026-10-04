@@ -10,12 +10,11 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -25,7 +24,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -45,56 +43,70 @@ import androidx.compose.material.icons.rounded.Remove
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.layout.boundsInRoot
-import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.constrainHeight
+import androidx.compose.ui.unit.constrainWidth
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.offset
 import androidx.compose.ui.unit.sp
 import io.github.hatake716.ohagi.R
 import io.github.hatake716.ohagi.data.AppRef
 import io.github.hatake716.ohagi.data.FolderLocation
 import io.github.hatake716.ohagi.ui.common.AppIconImage
-import io.github.hatake716.ohagi.ui.common.IOS_SELECTION_BLUE
+import io.github.hatake716.ohagi.ui.common.ContinuousRoundedShape
+import io.github.hatake716.ohagi.ui.common.continuousShadowShape
+import io.github.hatake716.ohagi.ui.common.GlassContentColor
+import io.github.hatake716.ohagi.ui.common.GlassSecondaryContentColor
+import io.github.hatake716.ohagi.ui.common.GlassTone
 import io.github.hatake716.ohagi.ui.common.IosGlassIconButton
 import io.github.hatake716.ohagi.ui.common.IosMotion
+import io.github.hatake716.ohagi.ui.common.IosSystemBlue
+import io.github.hatake716.ohagi.ui.common.LocalGlassAppearance
+import io.github.hatake716.ohagi.ui.common.modalScrimColor
 import io.github.hatake716.ohagi.ui.common.folderMotionKeys
 import io.github.hatake716.ohagi.ui.common.iosPageDistance
+import io.github.hatake716.ohagi.ui.common.liquidGlass
 import io.github.hatake716.ohagi.ui.common.rememberAppIconBitmap
+import io.github.hatake716.ohagi.ui.common.rememberBackdropBlurSupported
 import io.github.hatake716.ohagi.ui.common.rememberIosDragVisualState
+import io.github.hatake716.ohagi.ui.common.rememberIosPressScale
+import io.github.hatake716.ohagi.ui.common.rememberLayoutBoundsHolder
+import io.github.hatake716.ohagi.ui.common.trackLayoutBounds
 import io.github.hatake716.ohagi.ui.dragdrop.DragPayload
 import io.github.hatake716.ohagi.ui.dragdrop.folderLocationOrNull
-import io.github.hatake716.ohagi.ui.common.animatedUprightRotation
-import io.github.hatake716.ohagi.ui.common.rememberAnimatedUprightRotation
+import io.github.hatake716.ohagi.ui.common.animatedUprightRotationState
 import io.github.hatake716.ohagi.ui.common.uprightWithDevice
 import io.github.hatake716.ohagi.ui.dragdrop.ohagiDragSource
 import io.github.hatake716.ohagi.ui.dragdrop.ohagiDropTarget
 import io.github.hatake716.ohagi.ui.dragdrop.rememberOhagiDropTarget
-import io.github.hatake716.ohagi.ui.theme.Ink
-import io.github.hatake716.ohagi.ui.theme.Kome
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlin.math.max
 
@@ -103,7 +115,7 @@ private const val APPS_PER_FOLDER_PAGE = 9
 /**
  * ホームとDockで共用するiOS風フォルダ。
  *
- * - 中央の半透明パネル
+ * - 中央の Liquid Glass パネル
  * - 1ページ3×3、複数ページとページドット
  * - 長押しD&Dによる並べ替えとフォルダ外への移動
  * - 編集モードの揺れと削除ボタン
@@ -129,7 +141,8 @@ fun IosFolderOverlay(
     onDismiss: () -> Unit,
 ) {
     var editMode by remember { mutableStateOf(false) }
-    var panelBounds by remember { mutableStateOf<Rect?>(null) }
+    // パネルの画面上の矩形は、ドラッグの外出し判定と開閉アニメーションの瞬間にだけ求める。
+    val panelBounds = rememberLayoutBoundsHolder()
     // ヘッダ移動の計算にはレイヤー変換(横画面時のPortraitStage回転)の影響を受けない
     // レイアウト寸法を使う。boundsInRoot は変換後のAABBなので横画面では使えない。
     var panelLayoutSize by remember { mutableStateOf(IntSize.Zero) }
@@ -152,8 +165,10 @@ fun IosFolderOverlay(
         snapAnimationSpec = pageSnapSpec,
         snapPositionalThreshold = IosMotion.PAGE_POSITIONAL_THRESHOLD,
     )
-    LaunchedEffect(location, panelBounds) {
-        if (panelBounds != null && !closing && reveal.value == 0f) {
+    LaunchedEffect(location) {
+        // 開き始めの縮小率と位置はパネルの矩形から求めるので、パネルが測られるまで待つ。
+        snapshotFlow { panelLayoutSize != IntSize.Zero }.first { it }
+        if (!closing && reveal.value == 0f) {
             reveal.animateTo(
                 targetValue = 1f,
                 animationSpec = spring(
@@ -180,12 +195,9 @@ fun IosFolderOverlay(
 
     fun handleDragMoved(position: Offset) {
         onDragMoved(position)
-        val bounds = panelBounds
-        if (!dragOutRequested &&
-            isFromThisFolder(sessionPayload ?: activeDrag) &&
-            bounds != null &&
-            !bounds.contains(position)
-        ) {
+        if (dragOutRequested || !isFromThisFolder(sessionPayload ?: activeDrag)) return
+        val bounds = panelBounds.boundsInRoot() ?: return
+        if (!bounds.contains(position)) {
             dragOutRequested = true
             onDragOutside()
         }
@@ -225,12 +237,19 @@ fun IosFolderOverlay(
         onEnded = ::handleDragEnded,
         onDrop = { _, _ -> false },
     )
+    val contentColor = GlassContentColor
+    // 背面ぼかしが効く端末ではHomeScreen側がホームをぼかすので、暗転は控えめにする。
+    val backdropBlurred = rememberBackdropBlurSupported()
+    val appearance = LocalGlassAppearance.current
 
     Box(
         contentAlignment = Alignment.Center,
         modifier = Modifier
             .fillMaxSize()
-            .drawBehind { drawRect(Color.Black.copy(alpha = 0.46f * reveal.value)) }
+            .drawBehind {
+                val scrim = modalScrimColor(appearance.tint, backdropBlurred)
+                drawRect(scrim.copy(alpha = scrim.alpha * reveal.value))
+            }
             .ohagiDropTarget(backgroundDropTarget)
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
@@ -240,31 +259,30 @@ fun IosFolderOverlay(
             .safeDrawingPadding()
             .padding(horizontal = 18.dp, vertical = 30.dp),
     ) {
-        val panelShape = RoundedCornerShape(38.dp)
-        BoxWithConstraints(
+        val panelShape = FOLDER_PANEL_SHAPE
+        Box(
             modifier = Modifier
                 .widthIn(max = 390.dp)
                 .fillMaxWidth()
                 .heightIn(min = 430.dp, max = 520.dp)
-                .onGloballyPositioned {
-                    panelBounds = it.boundsInRoot()
-                    panelLayoutSize = it.size
-                },
+                .trackLayoutBounds(panelBounds)
+                .onSizeChanged { panelLayoutSize = it },
         ) {
-            // 横画面時はパネル背景だけを物理の上下(=このレイアウト座標の左右)へ広げ、
-            // 物理最下段のアイコン名称が背景の縁で切れないようにする。
-            // コンテンツ(グリッド等)の幅は同量の水平paddingで据え置く。
-            val panelExtra = FOLDER_PANEL_UPRIGHT_EXTRA *
-                (kotlin.math.abs(animatedUprightRotation()) / 90f)
-            val basePanelWidth = maxWidth
+            // 回転角はレイアウト/描画フェーズでだけ読み、回転アニメーション中に
+            // パネル全体を毎フレーム再compositionしない。
+            val uprightRotation = animatedUprightRotationState()
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 modifier = Modifier
                     .fillMaxSize()
-                    .requiredWidth(basePanelWidth + panelExtra * 2)
+                    // 横画面時はパネル背景だけを物理の上下(=このレイアウト座標の左右)へ広げ、
+                    // 物理最下段のアイコン名称が背景の縁で切れないようにする。
+                    // コンテンツ(グリッド等)の幅は同量の水平paddingで据え置く。
+                    .panelUprightWidth(uprightRotation)
                     .graphicsLayer {
                         val progress = reveal.value.coerceIn(0f, 1f)
-                        val finalBounds = panelBounds
+                        // この層は開閉アニメーション中だけ再実行されるので、その都度求める。
+                        val finalBounds = panelBounds.boundsInRoot()
                         val originBounds = sourceBounds
                         val startScale = if (
                             finalBounds != null && originBounds != null && finalBounds.width > 0f
@@ -289,41 +307,38 @@ fun IosFolderOverlay(
                         scaleY = scale
                         translationX = startTranslationX * (1f - progress)
                         translationY = startTranslationY * (1f - progress)
+                        // 影も同じレイヤーで落とし、パネルのレイヤーを1枚にする。
+                        // 中身(横画面時のヘッダ移動・グリッドのシフトを含む)は角の曲線より
+                        // 内側に収まるためクリップしない。クリップするとガラスの暗い縁の
+                        // 外側半分が欠ける。
+                        shadowElevation = FOLDER_PANEL_ELEVATION.toPx()
+                        shape = FOLDER_PANEL_SHADOW_SHAPE
+                        clip = false
+                        ambientShadowColor = FOLDER_PANEL_AMBIENT_SHADOW
+                        spotShadowColor = FOLDER_PANEL_SPOT_SHADOW
                     }
-                .shadow(
-                    elevation = 26.dp,
-                    shape = panelShape,
-                    clip = false,
-                    ambientColor = Color.Black.copy(alpha = 0.30f),
-                    spotColor = Color.Black.copy(alpha = 0.40f),
-                )
-                .clip(panelShape)
-                .background(
-                    Brush.verticalGradient(
-                        listOf(Color(0xE146444D), Color(0xE1222027)),
-                    ),
-                )
-                .border(0.75.dp, Color.White.copy(alpha = 0.24f), panelShape)
+                // panelUprightWidthで広げた幅(横画面時)の全体にガラスを描く。
+                .liquidGlass(panelShape, GlassTone.Regular)
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null,
                 ) {}
                 .padding(top = 10.dp, bottom = 14.dp)
-                .padding(horizontal = panelExtra),
+                .panelUprightPadding(uprightRotation),
             ) {
                 // 端末を横へ倒したときは、タイトル/編集/追加のヘッダ行をパネルの
                 // 「ユーザーから見て上」= 左右どちらかの辺へ回転しながら移す。
                 // レイアウト位置は変えず(パネル寸法もグリッドも不変)、描画変換だけで
                 // 辺の内側中央へ移動する。ヒットテストは変換に追従するため操作も可能。
-                val uprightRotation by rememberAnimatedUprightRotation()
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier
                         .fillMaxWidth()
                         .graphicsLayer {
-                            rotationZ = uprightRotation
+                            val rotation = uprightRotation.value
+                            rotationZ = rotation
                             val panel = panelLayoutSize
-                            if (panel != IntSize.Zero && uprightRotation != 0f) {
+                            if (panel != IntSize.Zero && rotation != 0f) {
                                 val margin = 4.dp.toPx()
                                 val headerTop = 10.dp.toPx()
                                 val edgeShift =
@@ -333,49 +348,51 @@ fun IosFolderOverlay(
                                     (panel.height / 2f - headerTop - size.height / 2f)
                                         .coerceAtLeast(0f)
                                 // +90(ユーザーの上=画面右)なら右辺へ、-90なら左辺へ。
-                                val fraction = uprightRotation / 90f
+                                val fraction = rotation / 90f
                                 translationX = fraction * edgeShift
                                 translationY = kotlin.math.abs(fraction) * downShift
                             }
                         }
+                        // 最小タップ領域と同じ48dpを保ち、グリッドの縦位置を変えない。
+                        .heightIn(min = 48.dp)
                         .padding(horizontal = 12.dp),
                 ) {
-                TextButton(onClick = { editMode = !editMode }) {
-                    Text(
-                        text = stringResource(
-                            if (editMode) R.string.action_done else R.string.folder_edit,
-                        ),
-                        color = IOS_SELECTION_BLUE,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                }
+                FolderGlassCapsuleButton(
+                    text = stringResource(
+                        if (editMode) R.string.action_done else R.string.folder_edit,
+                    ),
+                    prominent = editMode,
+                    onClick = { editMode = !editMode },
+                )
 
                 Row(
                     horizontalArrangement = Arrangement.Center,
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier
                         .weight(1f)
-                        .clip(RoundedCornerShape(14.dp))
                         .clickable(
                             interactionSource = remember { MutableInteractionSource() },
                             indication = null,
                             onClick = onRename,
                         )
-                        .padding(horizontal = 6.dp, vertical = 8.dp),
+                        .padding(horizontal = 6.dp, vertical = 6.dp),
                 ) {
                     Text(
                         text = folderName,
-                        color = Kome,
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.SemiBold,
+                        color = GlassContentColor,
+                        fontSize = 22.sp,
+                        lineHeight = 26.sp,
+                        fontWeight = FontWeight.Bold,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
+                        // 長い名前でも鉛筆アイコンを押し出さないよう、先に残り幅を確保させる。
+                        modifier = Modifier.weight(1f, fill = false),
                     )
                     Spacer(Modifier.width(5.dp))
                     Icon(
                         imageVector = Icons.Rounded.Edit,
                         contentDescription = stringResource(R.string.action_rename),
-                        tint = Kome.copy(alpha = 0.58f),
+                        tint = GlassSecondaryContentColor,
                         modifier = Modifier.size(16.dp),
                     )
                 }
@@ -384,7 +401,7 @@ fun IosFolderOverlay(
                     imageVector = Icons.Rounded.Add,
                     contentDescription = stringResource(R.string.folder_add_apps),
                     onClick = onAddApps,
-                    size = 38.dp,
+                    size = FOLDER_HEADER_BUTTON_HEIGHT,
                 )
             }
 
@@ -399,7 +416,7 @@ fun IosFolderOverlay(
                         // 横画面時はヘッダ(物理では上=パネルの側辺)と3列目のアイコンが
                         // 重ならないよう、グリッド全体を物理の下方向へ少しずらす。
                         translationX =
-                            -(uprightRotation / 90f) * FOLDER_GRID_UPRIGHT_SHIFT.toPx()
+                            -(uprightRotation.value / 90f) * FOLDER_GRID_UPRIGHT_SHIFT.toPx()
                     },
             ) { page ->
                 Box(
@@ -441,21 +458,21 @@ fun IosFolderOverlay(
                 modifier = Modifier.height(20.dp),
             ) {
                 repeat(pageCount) { page ->
+                    // ドットごとのレイヤーを作らず、ページ位置は描画フェーズで読む。
                     Box(
                         Modifier
                             .size(7.dp)
-                            .graphicsLayer {
+                            .drawBehind {
                                 val pagePosition = pagerState.currentPage +
                                     pagerState.currentPageOffsetFraction
                                 val proximity = 1f -
                                     kotlin.math.abs(page - pagePosition).coerceIn(0f, 1f)
-                                alpha = 0.30f + 0.65f * proximity
-                                val scale = 0.86f + 0.14f * proximity
-                                scaleX = scale
-                                scaleY = scale
-                            }
-                            .clip(CircleShape)
-                            .background(Kome),
+                                drawCircle(
+                                    color = contentColor,
+                                    radius = size.minDimension / 2f * (0.86f + 0.14f * proximity),
+                                    alpha = 0.30f + 0.65f * proximity,
+                                )
+                            },
                     )
                 }
             }
@@ -551,7 +568,8 @@ private fun FolderAppCell(
     val label = labelOf(app)
     var pressed by remember { mutableStateOf(false) }
     var dropHovered by remember { mutableStateOf(false) }
-    var iconBounds by remember(app) { mutableStateOf<Rect?>(null) }
+    // 起動アニメーション元の矩形はタップの瞬間にだけ求める。
+    val iconBounds = rememberLayoutBoundsHolder()
     val haptic = LocalHapticFeedback.current
     val icon by rememberAppIconBitmap(app)
     val payload = remember(location, appIndex, app) {
@@ -619,13 +637,15 @@ private fun FolderAppCell(
                 scaleY = dragVisual.scale
                 alpha = dragVisual.alpha
                 rotationZ = wiggle?.value ?: 0f
+                // 角丸クリップも同じレイヤーで行い、セルごとのレイヤーを1枚に保つ。
+                shape = FOLDER_CELL_SHAPE
+                clip = true
             }
-            .clip(RoundedCornerShape(18.dp))
             .ohagiDropTarget(dropTarget)
             .ohagiDragSource(
                 payload = payload,
                 icon = icon,
-                onTap = { if (!editMode) onLaunch(iconBounds) },
+                onTap = { if (!editMode) onLaunch(iconBounds.boundsInRoot()) },
                 onPressChanged = { pressed = it },
                 onDragStarted = {
                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -638,18 +658,19 @@ private fun FolderAppCell(
             .uprightWithDevice(),
     ) {
         Box(
-            modifier = Modifier.onGloballyPositioned { iconBounds = it.boundsInRoot() },
+            modifier = Modifier.trackLayoutBounds(iconBounds),
         ) {
             AppIconImage(icon = icon, size = 58.dp)
             if (editMode) {
+                // iOS 26 の明るいガラスの小円。アイコンの色に負けないよう下地を敷き、
+                // クリップ(レイヤー)は使わず描画だけで作る。
                 Box(
                     contentAlignment = Alignment.Center,
                     modifier = Modifier
                         .align(Alignment.TopStart)
                         .size(22.dp)
-                        .clip(CircleShape)
-                        .background(Color(0xFFF2F2F7))
-                        .border(0.5.dp, Color.Black.copy(alpha = 0.18f), CircleShape)
+                        .background(FOLDER_REMOVE_BADGE_BASE, CircleShape)
+                        .liquidGlass(CircleShape, GlassTone.Light, highlight = 0.7f)
                         .clickable(
                             interactionSource = remember { MutableInteractionSource() },
                             indication = null,
@@ -659,7 +680,7 @@ private fun FolderAppCell(
                     Icon(
                         imageVector = Icons.Rounded.Remove,
                         contentDescription = stringResource(R.string.folder_remove_app, label),
-                        tint = Color(0xFF3A3A3C),
+                        tint = FOLDER_REMOVE_BADGE_SYMBOL,
                         modifier = Modifier.size(16.dp),
                     )
                 }
@@ -668,7 +689,7 @@ private fun FolderAppCell(
         Spacer(Modifier.height(5.dp))
         Text(
             text = label,
-            color = Kome,
+            color = GlassContentColor,
             style = MaterialTheme.typography.labelMedium,
             lineHeight = 13.sp,
             maxLines = 2,
@@ -679,8 +700,109 @@ private fun FolderAppCell(
     }
 }
 
+/**
+ * ヘッダの「編集」/「完了」。iOS 26 のガラスのカプセルで、編集中は
+ * 塗りつぶしの青いガラス(プロミネント)にして終了操作を目立たせる。
+ */
+@Composable
+private fun FolderGlassCapsuleButton(
+    text: String,
+    prominent: Boolean,
+    onClick: () -> Unit,
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressed by interactionSource.collectIsPressedAsState()
+    val pressScale = rememberIosPressScale(
+        pressed = pressed,
+        pressedScale = 0.92f,
+        label = "folderEditButtonScale",
+    )
+    val shape = FOLDER_CAPSULE_SHAPE
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier
+            .height(FOLDER_HEADER_BUTTON_HEIGHT)
+            .widthIn(min = 64.dp)
+            .graphicsLayer {
+                scaleX = pressScale.value
+                scaleY = pressScale.value
+            }
+            .then(
+                if (prominent) Modifier.background(IosSystemBlue, shape) else Modifier,
+            )
+            .liquidGlass(
+                shape = shape,
+                tone = GlassTone.Regular,
+                accent = if (prominent) IosSystemBlue else null,
+                highlight = 0.85f,
+            )
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                role = Role.Button,
+                onClick = onClick,
+            )
+            .padding(horizontal = 14.dp),
+    ) {
+        Text(
+            text = text,
+            color = GlassContentColor,
+            fontSize = 15.sp,
+            fontWeight = if (prominent) FontWeight.Bold else FontWeight.SemiBold,
+            maxLines = 1,
+        )
+    }
+}
+
+private val FOLDER_PANEL_SHAPE = ContinuousRoundedShape(40.dp)
+private val FOLDER_PANEL_SHADOW_SHAPE = continuousShadowShape(40.dp)
+private val FOLDER_CAPSULE_SHAPE = RoundedCornerShape(50)
+private val FOLDER_CELL_SHAPE = RoundedCornerShape(18.dp)
+private val FOLDER_HEADER_BUTTON_HEIGHT = 36.dp
+
+private val FOLDER_PANEL_ELEVATION = 26.dp
+private val FOLDER_PANEL_AMBIENT_SHADOW = Color.Black.copy(alpha = 0.30f)
+private val FOLDER_PANEL_SPOT_SHADOW = Color.Black.copy(alpha = 0.40f)
+
+/** 削除バッジの下地。ガラスの透け具合に関係なく「−」を読めるようにする。 */
+private val FOLDER_REMOVE_BADGE_BASE = Color(0xC7E5E5EA)
+private val FOLDER_REMOVE_BADGE_SYMBOL = Color(0xFF1C1C1E)
+
 /** 横画面時にフォルダグリッドをヘッダから離す物理下方向へのシフト量。 */
 private val FOLDER_GRID_UPRIGHT_SHIFT = 28.dp
 
 /** 横画面時にパネル背景を物理の上下(それぞれ)へ広げる量。名称の見切れ防止。 */
 private val FOLDER_PANEL_UPRIGHT_EXTRA = 34.dp
+
+private fun panelUprightExtra(rotation: Float): Dp =
+    FOLDER_PANEL_UPRIGHT_EXTRA * (kotlin.math.abs(rotation) / 90f)
+
+/**
+ * requiredWidth(親の最大幅 + 両側の拡張分) と同じ丸め・同じ配置で測る。
+ * 拡張分は回転角で変わるので、角度をこの測定ブロックの中で読む。
+ */
+private fun Modifier.panelUprightWidth(rotation: State<Float>): Modifier =
+    layout { measurable, constraints ->
+        val extra = panelUprightExtra(rotation.value)
+        val width = (constraints.maxWidth.toDp() + extra * 2).roundToPx().coerceAtLeast(0)
+        val placeable = measurable.measure(
+            Constraints(
+                minWidth = width,
+                maxWidth = width,
+                minHeight = constraints.minHeight,
+                maxHeight = constraints.maxHeight,
+            ),
+        )
+        layout(placeable.width, placeable.height) { placeable.placeRelative(0, 0) }
+    }
+
+/** padding(horizontal = 拡張分) と同じ測り方。[panelUprightWidth] で広げた分を中身から戻す。 */
+private fun Modifier.panelUprightPadding(rotation: State<Float>): Modifier =
+    layout { measurable, constraints ->
+        val inset = panelUprightExtra(rotation.value).roundToPx()
+        val placeable = measurable.measure(constraints.offset(horizontal = -inset * 2))
+        layout(
+            constraints.constrainWidth(placeable.width + inset * 2),
+            constraints.constrainHeight(placeable.height),
+        ) { placeable.placeRelative(inset, 0) }
+    }

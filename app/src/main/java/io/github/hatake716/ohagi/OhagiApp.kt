@@ -1,7 +1,6 @@
 package io.github.hatake716.ohagi
 
 import android.app.Application
-import io.github.hatake716.ohagi.util.SplitLaunchNotification
 
 class OhagiApp : Application() {
 
@@ -10,7 +9,8 @@ class OhagiApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
-        SplitLaunchNotification.createChannel(this)
+        // 分割起動の通知チャネルは SplitLaunchNotification の通知 worker が投稿前に作る。
+        // ここで作ると cold start のメインスレッドに NotificationManager の Binder 呼び出しが入る。
         graph = Graph(this)
         graph.start()
     }

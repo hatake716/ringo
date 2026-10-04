@@ -84,6 +84,20 @@
     <string name="split_notification_text">%1$sと分割する2つ目のアプリを選択できます</string>
     <string name="split_notification_action">ohagi</string>
 
+    <!-- iOS 27 風の外観 -->
+    <string name="home_search_pill">検索</string>
+    <string name="home_search_pill_description">Appライブラリで検索</string>
+    <string name="settings_title">設定</string>
+    <string name="settings_appearance">外観</string>
+    <string name="settings_theme_system">システムに合わせる</string>
+    <string name="settings_theme_light">ライト</string>
+    <string name="settings_theme_dark">ダーク</string>
+    <string name="settings_theme_caption">システムに合わせる場合は、端末のダークテーマ設定に連動します。</string>
+    <string name="settings_glass_transparency">ガラスの透明度</string>
+    <string name="settings_glass_clear">クリア</string>
+    <string name="settings_glass_tinted">着色</string>
+    <string name="settings_glass_caption">Dock、フォルダ、メニュー、Appライブラリのガラスの見え方を調整します。</string>
+
     <!-- ホームへのファイル/フォルダピン(macOS デスクトップ風) -->
     <string name="menu_pin_app">アプリを置く</string>
     <string name="menu_pin_file">ファイルを置く</string>
@@ -97,4 +111,5 @@
     <string name="toast_pin_open_failed">開けるアプリが見つかりません</string>
     <string name="toast_pin_missing">ファイルが見つかりません。長押しメニューからピンを外せます</string>
     <string name="toast_pin_limit_near">ピン留めできる数が上限に近づいています</string>
+    <string name="action_clear_text">テキストを消去</string>
 </resources>

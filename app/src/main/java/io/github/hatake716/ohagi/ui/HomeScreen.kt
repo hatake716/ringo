@@ -11,6 +11,25 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.selection.LocalTextSelectionColors
+import androidx.compose.foundation.text.selection.TextSelectionColors
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.requiredSize
@@ -25,7 +44,6 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerDefaults
 import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.rememberPagerState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material.icons.Icons
@@ -33,6 +51,7 @@ import androidx.compose.material.icons.automirrored.rounded.InsertDriveFile
 import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Apps
+import androidx.compose.material.icons.rounded.Cancel
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.CreateNewFolder
 import androidx.compose.material.icons.rounded.Delete
@@ -40,39 +59,58 @@ import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.PlayArrow
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
+import androidx.core.view.WindowCompat
+import io.github.hatake716.ohagi.ui.theme.LocalOhagiColors
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.boundsInRoot
-import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.drawOutline
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import io.github.hatake716.ohagi.LocalGraph
@@ -91,9 +129,16 @@ import io.github.hatake716.ohagi.data.preferredAppRefs
 import io.github.hatake716.ohagi.ui.common.AppPickerSheet
 import io.github.hatake716.ohagi.ui.common.APP_LIBRARY_MINI_ICON_SIZE
 import io.github.hatake716.ohagi.ui.common.APP_LIBRARY_PREVIEW_ICON_SIZE
+import io.github.hatake716.ohagi.ui.common.ContinuousRoundedShape
 import io.github.hatake716.ohagi.ui.common.FREQUENT_APP_ICON_SIZE
+import io.github.hatake716.ohagi.ui.common.GlassContentColor
+import io.github.hatake716.ohagi.ui.common.GlassSecondaryContentColor
+import io.github.hatake716.ohagi.ui.common.IosDestructiveRed
 import io.github.hatake716.ohagi.ui.common.IosMotion
+import io.github.hatake716.ohagi.ui.common.IosSystemBlue
 import io.github.hatake716.ohagi.ui.common.LocalDeviceUprightRotation
+import io.github.hatake716.ohagi.ui.common.MODAL_GLASS_MIN_OPACITY_BLURRED
+import io.github.hatake716.ohagi.ui.common.MODAL_GLASS_MIN_OPACITY_OPAQUE
 import io.github.hatake716.ohagi.ui.common.MenuEntry
 import io.github.hatake716.ohagi.ui.common.MenuSheet
 import io.github.hatake716.ohagi.ui.common.appCategoryTitleRes
@@ -101,7 +146,16 @@ import io.github.hatake716.ohagi.ui.common.appLibraryPrefetchBudget
 import io.github.hatake716.ohagi.ui.common.buildAppLibraryIconPrefetchRequests
 import io.github.hatake716.ohagi.ui.common.iosHomeSurfaceVisibility
 import io.github.hatake716.ohagi.ui.common.iosPageDistance
+import io.github.hatake716.ohagi.ui.common.liquidGlass
+import io.github.hatake716.ohagi.ui.common.overlayBackdropBlur
+import io.github.hatake716.ohagi.ui.common.rememberCrossWindowBlurEnabled
+import io.github.hatake716.ohagi.ui.common.rememberBackdropBlurSupported
+import io.github.hatake716.ohagi.ui.common.rememberDialogWindowBackdropBlur
+import io.github.hatake716.ohagi.ui.common.rememberLayoutBoundsHolder
 import io.github.hatake716.ohagi.ui.common.toLaunchBounds
+import io.github.hatake716.ohagi.ui.common.trackLayoutBounds
+import io.github.hatake716.ohagi.ui.common.uprightWithDevice
+import io.github.hatake716.ohagi.ui.dock.DOCK_BAR_HEIGHT
 import io.github.hatake716.ohagi.ui.dock.DockBar
 import io.github.hatake716.ohagi.ui.dragdrop.DragPayload
 import io.github.hatake716.ohagi.ui.dragdrop.isOhagiRemovableDrag
@@ -203,6 +257,21 @@ fun HomeScreen(
         initialPage = PRIMARY_HOME_PAGER_INDEX,
         pageCount = { layout.homePageCount + STATIC_PAGE_COUNT },
     )
+    val darkTheme = LocalOhagiColors.current.isDark
+    val wallpaperDarkText by graph.appearanceRepository.wallpaperSupportsDarkText.collectAsStateWithLifecycle()
+    val onWallpaper = pagerState.currentPage in 1..layout.homePageCount
+    val darkStatusIcons = if (onWallpaper) !isSystemInDarkTheme() else !darkTheme
+    val darkNavigationIcons = if (onWallpaper) wallpaperDarkText else !darkTheme
+    SideEffect {
+        // The wallpaper's overall color hint cannot describe its top edge. Preserve the
+        // system's status-bar style over wallpaper; painted pages follow the app palette.
+        (context as? Activity)?.window?.let { window ->
+            WindowCompat.getInsetsController(window, window.decorView).apply {
+                isAppearanceLightStatusBars = darkStatusIcons
+                isAppearanceLightNavigationBars = darkNavigationIcons
+            }
+        }
+    }
     val pageSnapSpec = remember {
         spring<Float>(
             dampingRatio = IosMotion.PAGE_SNAP_DAMPING,
@@ -238,6 +307,10 @@ fun HomeScreen(
         layout.preferredAppRefs(rankedLaunches)
     }
     val appLibraryPage = layout.homePageCount + 1
+    // 各ページへ同じ List を渡し、Pager の再compositionのたびに24要素を作り直さない。
+    val homePages = remember(layout.home) {
+        List(layout.homePageCount) { page -> layout.homePage(page) }
+    }
 
     // HOME再押下ではオーバーレイを閉じ、必ず1枚目のホームへ戻る。
     LaunchedEffect(Unit) {
@@ -250,16 +323,20 @@ fun HomeScreen(
         }
     }
 
-    BackHandler(enabled = overlay == Overlay.None && pagerState.currentPage != PRIMARY_HOME_PAGER_INDEX) {
-        scope.launch {
-            pagerState.animateScrollToPage(
-                page = PRIMARY_HOME_PAGER_INDEX,
-                animationSpec = pageSnapSpec,
-            )
-        }
-    }
-    // 1枚目のホームではバックキーを無効化(ランチャーの標準挙動)
-    BackHandler(enabled = overlay == Overlay.None && pagerState.currentPage == PRIMARY_HOME_PAGER_INDEX) { }
+    // 表示ページは子の中で読み、ページ送りのたびに HomeScreen 全体を再composeしない。
+    // 後から登録した BackHandler が優先されるため、オーバーレイ用より先に呼ぶ。
+    HomePagerBackHandlers(
+        pagerState = pagerState,
+        overlayOpen = overlay != Overlay.None,
+        onBackToPrimaryHome = {
+            scope.launch {
+                pagerState.animateScrollToPage(
+                    page = PRIMARY_HOME_PAGER_INDEX,
+                    animationSpec = pageSnapSpec,
+                )
+            }
+        },
+    )
     BackHandler(enabled = overlay != Overlay.None) { overlay = Overlay.None }
 
     val returnScale = remember { Animatable(1f) }
@@ -295,20 +372,21 @@ fun HomeScreen(
     // ---- 公式 Compose Drag and Drop ----
     var activeDrag by remember { mutableStateOf<DragPayload?>(null) }
     var trashHovered by remember { mutableStateOf(false) }
-    var trashBounds by remember { mutableStateOf<Rect?>(null) }
-    var rootBounds by remember { mutableStateOf<Rect?>(null) }
+    // 削除領域とルートの矩形はドラッグ移動・ドロップの時にだけ計算する。
+    val trashBounds = rememberLayoutBoundsHolder()
+    val rootBounds = rememberLayoutBoundsHolder()
     var edgeTransitionInProgress by remember { mutableStateOf(false) }
     var edgeDestinationHomePage by remember { mutableStateOf<Int?>(null) }
     var createdPageDuringDrag by remember { mutableStateOf(false) }
     /** このドラッグセッションでいずれかのドロップが受理されたか(仮ページ破棄の判定用)。 */
     var pageDropAccepted by remember { mutableStateOf(false) }
     /**
-     * ページ内セル番号(0..23)→ルート座標の矩形。全ホームページが同じグリッド位置を
-     * 共有するため1ページ分で足りる。ページ跨ぎドロップは公式D&Dのターゲットに
+     * ホームのグローバルセルindex→セルの座標。ページ跨ぎドロップは公式D&Dのターゲットに
      * 参加できない(ドラッグ開始時に存在したターゲットしか候補にならない)ので、
-     * ルートのfallbackがこの矩形からドロップ先セルを解決する。
+     * ルートのfallbackがドロップ時にここから矩形を計算してドロップ先セルを解決する。
+     * 配置のたびに書き込まれるため snapshot 状態にはしない。
      */
-    val homeCellBounds = remember { mutableStateMapOf<Int, Rect>() }
+    val homeCellCoordinates = remember { HashMap<Int, LayoutCoordinates>() }
     var edgeDropCommitted by remember { mutableStateOf(false) }
     var edgeDropBaselineHome by remember { mutableStateOf<List<HomeItem?>?>(null) }
     var pageLimitToastShown by remember { mutableStateOf(false) }
@@ -611,7 +689,7 @@ fun HomeScreen(
     }
 
     fun isTrashDrop(payload: DragPayload, position: Offset): Boolean =
-        payload.isRemovable() && trashBounds?.contains(position) == true
+        payload.isRemovable() && trashBounds.boundsInRoot()?.contains(position) == true
 
     fun dropOnDestinationHomePage(
         destinationPage: Int,
@@ -683,7 +761,7 @@ fun HomeScreen(
         val payload = activeDrag
         trashHovered = payload != null && isTrashDrop(payload, position)
         if (payload == null || trashHovered || edgeTransitionInProgress) return
-        val bounds = rootBounds ?: return
+        val bounds = rootBounds.boundsInRoot() ?: return
         val currentPage = pagerState.currentPage
         if (currentPage !in 1..layout.homePageCount) return
         val atRightEdge = position.x >= bounds.right - edgeZonePx
@@ -764,15 +842,26 @@ fun HomeScreen(
 
         // 表示中のホームページ上で、ドロップ位置直下のセルを探す。
         if (pagerState.currentPage in 1..layout.homePageCount) {
-            val visiblePage = pagerState.currentPage - 1
-            val cellEntry = homeCellBounds.entries.firstOrNull { it.value.contains(position) }
-            if (cellEntry != null) {
-                val index = visiblePage *
-                    io.github.hatake716.ohagi.data.LayoutState.HOME_CELL_COUNT + cellEntry.key
+            val firstIndex = homeGlobalIndex(pagerState.currentPage - 1, 0)
+            var cellIndex = -1
+            var cellBounds: Rect? = null
+            for (index in firstIndex until
+                firstIndex + io.github.hatake716.ohagi.data.LayoutState.HOME_CELL_COUNT) {
+                val bounds = homeCellCoordinates[index]
+                    ?.takeIf { it.isAttached }
+                    ?.boundsInRoot()
+                    ?: continue
+                if (bounds.contains(position)) {
+                    cellIndex = index
+                    cellBounds = bounds
+                    break
+                }
+            }
+            if (cellBounds != null) {
                 // セル中央付近ならiOSのフォルダ化/追加と同じ重ね操作として扱う。
-                val stackIntent = (position - cellEntry.value.center).getDistance() <=
+                val stackIntent = (position - cellBounds.center).getDistance() <=
                     with(density) { HOME_FALLBACK_STACK_RADIUS.toPx() }
-                val accepted = dropOnHome(index, payload, stackIntent)
+                val accepted = dropOnHome(cellIndex, payload, stackIntent)
                 if (accepted) {
                     pageDropAccepted = true
                     return true
@@ -826,6 +915,51 @@ fun HomeScreen(
         },
     )
 
+    // フォルダ・メニュー・シートを開いている間だけ、背面のホーム(Pager/Dock/検索)をぼかす。
+    // 進捗は各layerの描画フェーズで読み、フェード中にHomeScreenを再composeしない。
+    // メニュー・シート・ダイアログは別ウィンドウで、ウィンドウ背面ぼかしが壁紙ごと
+    // ぼかすので、アプリ内のぼかしはフォルダ(同じウィンドウ)と、ウィンドウぼかしが
+    // 使えない時だけに限る。二重に掛けると全画面のオフスクリーン描画が無駄に増える。
+    val backdropBlurEnabled = rememberBackdropBlurSupported()
+    val crossWindowBlurEnabled = rememberCrossWindowBlurEnabled()
+    val backdropBlurWanted = when (overlay) {
+        Overlay.None -> false
+        is Overlay.FolderView -> true
+        else -> !crossWindowBlurEnabled
+    }
+    val backdropBlurProgress = animateFloatAsState(
+        targetValue = if (backdropBlurWanted) 1f else 0f,
+        animationSpec = tween(durationMillis = BACKDROP_BLUR_FADE_MS, easing = IosMotion.easeOut),
+        label = "homeBackdropBlur",
+    )
+    val backdropBlurProgressOf = remember(backdropBlurProgress) { { backdropBlurProgress.value } }
+    // ホームの「検索」カプセルが押されるたびに増やし、Appライブラリの検索欄へフォーカスさせる。
+    var librarySearchFocusSignal by remember { mutableIntStateOf(0) }
+
+    // 挿入余白(composed{})・overlayBackdropBlur・trackLayoutBounds は呼ぶたびに等しくない
+    // Modifier を返す。HomeGrid/DockBar/Pager が HomeScreen の再compositionで skip でき、
+    // 配置モディファイアが毎回更新扱いにならないよう remember する。
+    val navigationBarBottomInsets = WindowInsets.navigationBars.only(WindowInsetsSides.Bottom)
+    val homeGridModifier = remember(navigationBarBottomInsets) {
+        // 下端はDockと検索カプセルの分だけ空ける。どちらもnavigation barの上に載るため、
+        // ここも同じinsetを足して位置関係をそろえる。
+        Modifier
+            .fillMaxSize()
+            .statusBarsPadding()
+            .windowInsetsPadding(navigationBarBottomInsets)
+            .padding(bottom = HOME_GRID_BOTTOM_RESERVED)
+    }
+    val pagerModifier = remember(backdropBlurEnabled, backdropBlurProgressOf) {
+        Modifier
+            .fillMaxSize()
+            .overlayBackdropBlur(
+                enabled = backdropBlurEnabled,
+                progress = backdropBlurProgressOf,
+            )
+    }
+    val rootBoundsTracking = remember(rootBounds) { Modifier.trackLayoutBounds(rootBounds) }
+    val trashBoundsTracking = remember(trashBounds) { Modifier.trackLayoutBounds(trashBounds) }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -834,7 +968,7 @@ fun HomeScreen(
                 scaleY = returnScale.value
                 alpha = returnAlpha.value
             }
-            .onGloballyPositioned { rootBounds = it.boundsInRoot() }
+            .then(rootBoundsTracking)
             .ohagiDropTarget(pagerFallbackTarget),
     ) {
         // DragAndDropNodeはレイアウトツリーの先頭から候補を探索するため、ホームと重なる
@@ -846,8 +980,9 @@ fun HomeScreen(
             animationSpec = tween(durationMillis = 150, easing = FastOutSlowInEasing),
             label = "trashVisibility",
         )
+        // 通常は赤みのガラス、ドラッグ中のアイコンが重なった時だけ下地の赤を濃くする。
         val trashColor by animateColorAsState(
-            targetValue = if (trashHovered) Color(0xE6D32F2F) else Color(0xB31C1C1E),
+            targetValue = IosDestructiveRed.copy(alpha = if (trashHovered) 0.82f else 0f),
             animationSpec = tween(durationMillis = 120),
             label = "trashColor",
         )
@@ -855,7 +990,7 @@ fun HomeScreen(
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .zIndex(10f)
-                .onGloballyPositioned { trashBounds = it.boundsInRoot() }
+                .then(trashBoundsTracking)
                 .statusBarsPadding()
                 .padding(top = 12.dp)
                 .graphicsLayer {
@@ -864,26 +999,32 @@ fun HomeScreen(
                     scaleX = scale
                     scaleY = scale
                 }
-                .clip(RoundedCornerShape(24.dp))
-                .drawBehind { drawRect(trashColor) }
+                .drawWithCache {
+                    val outline = HomeCapsuleShape.createOutline(size, layoutDirection, this)
+                    onDrawBehind { drawOutline(outline, trashColor) }
+                }
+                .liquidGlass(HomeCapsuleShape, accent = IosDestructiveRed)
                 .ohagiDropTarget(
                     target = trashTarget,
                     accept = { event -> event.isOhagiRemovableDrag() },
                 )
-                .padding(horizontal = 24.dp, vertical = 12.dp),
+                .padding(horizontal = 22.dp, vertical = 12.dp),
         ) {
-            androidx.compose.foundation.layout.Row(
+            Row(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                androidx.compose.material3.Icon(
+                Icon(
                     imageVector = Icons.Rounded.Delete,
                     contentDescription = null,
-                    tint = Color.White,
+                    tint = GlassContentColor,
+                    modifier = Modifier.size(22.dp),
                 )
-                androidx.compose.foundation.layout.Spacer(Modifier.width(8.dp))
+                Spacer(Modifier.width(8.dp))
                 Text(
                     text = stringResource(R.string.action_remove),
-                    color = Color.White,
+                    color = GlassContentColor,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold,
                 )
             }
         }
@@ -955,7 +1096,7 @@ fun HomeScreen(
                     else -> "app-library"
                 }
             },
-            modifier = Modifier.fillMaxSize(),
+            modifier = pagerModifier,
         ) { page ->
             Box(
                 modifier = Modifier
@@ -992,7 +1133,7 @@ fun HomeScreen(
                     page in 1..layout.homePageCount -> {
                         val homePage = page - 1
                         HomeGrid(
-                            home = layout.homePage(homePage),
+                            home = homePages.getOrNull(homePage) ?: layout.homePage(homePage),
                             indexOffset = homeGlobalIndex(homePage, 0),
                             activeDrag = activeDrag,
                             labelOf = appLabelOf,
@@ -1019,16 +1160,13 @@ fun HomeScreen(
                                     Overlay.EmptyCellMenu(index)
                                 }
                             },
-                            onCellBounds = { cell, rect -> homeCellBounds[cell] = rect },
+                            cellCoordinates = homeCellCoordinates,
                             onDrop = ::routeDropOnHome,
                             canStack = ::canStackOnHome,
                             onDragMoved = ::updateDragPosition,
                             onDragSessionStarted = { activeDrag = it },
                             onDragSessionEnded = ::endDragSession,
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .statusBarsPadding()
-                                .padding(bottom = HOME_GRID_BOTTOM_RESERVED),
+                            modifier = homeGridModifier,
                         )
                     }
 
@@ -1063,6 +1201,7 @@ fun HomeScreen(
                                 )
                             }
                         },
+                        focusSearchSignal = librarySearchFocusSignal,
                         )
                     }
                 }
@@ -1070,31 +1209,71 @@ fun HomeScreen(
         }
 
         // fractional offsetは描画フェーズでのみ読む。指の移動ごとにHomeScreen全体を
-        // 再composeせず、Dockとページドットのlayerだけを更新する。
+        // 再composeせず、Dockと検索カプセル/ページドットのlayerだけを更新する。
+        // 表示の要否も derivedStateOf で真偽が変わった時だけ HomeScreen へ伝える。
         val homePageCount = layout.homePageCount
-        val composeHomeChrome = pagerState.isScrollInProgress ||
-            pagerState.currentPage in 1..homePageCount
+        val composeHomeChrome by remember(pagerState, homePageCount) {
+            derivedStateOf {
+                pagerState.isScrollInProgress ||
+                    pagerState.currentPage in 1..homePageCount
+            }
+        }
 
-        if (homePageCount > 1 && composeHomeChrome) {
-            HomePageIndicator(
-                pageCount = homePageCount,
+        if (composeHomeChrome) {
+            HomeSearchChrome(
                 pagerState = pagerState,
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .navigationBarsPadding()
-                    .padding(bottom = HOME_PAGE_INDICATOR_BOTTOM)
-                    .graphicsLayer {
-                        val homeSurfaceVisibility = iosHomeSurfaceVisibility(
-                            pagerPosition = pagerState.currentPage + pagerState.currentPageOffsetFraction,
-                            homePageCount = homePageCount,
+                homePageCount = homePageCount,
+                dragInProgress = activeDrag != null,
+                backdropBlurEnabled = backdropBlurEnabled,
+                backdropBlurProgress = backdropBlurProgressOf,
+                dockHiddenOffsetPx = dockHiddenOffsetPx,
+                onSearch = {
+                    scope.launch {
+                        pagerState.animateScrollToPage(
+                            page = pagerState.pageCount - 1,
+                            animationSpec = pageSnapSpec,
                         )
-                        alpha = homeSurfaceVisibility
-                        translationY = (1f - homeSurfaceVisibility) * dockHiddenOffsetPx * 0.45f
-                    },
+                        // Appライブラリのページがcompose済みになってから合図し、
+                        // 初回compose時の値と区別できるようにする。
+                        librarySearchFocusSignal++
+                    }
+                },
+                modifier = Modifier.align(Alignment.BottomCenter),
             )
         }
 
+        // ぼかしのlayerを余白の外側に置き、Dockの影とにじみを切らない。
         // 指のページ位置へ連続追従し、両端ページでは下へ退避して構成からも外す。
+        val dockModifier = remember(
+            backdropBlurEnabled,
+            backdropBlurProgressOf,
+            pagerState,
+            homePageCount,
+            dockHiddenOffsetPx,
+        ) {
+            Modifier
+                .align(Alignment.BottomCenter)
+                .overlayBackdropBlur(
+                    enabled = backdropBlurEnabled,
+                    progress = backdropBlurProgressOf,
+                )
+                .navigationBarsPadding()
+                .padding(
+                    horizontal = DOCK_OUTER_MARGIN_HORIZONTAL,
+                    vertical = DOCK_OUTER_MARGIN_VERTICAL,
+                )
+                .graphicsLayer {
+                    val homeSurfaceVisibility = iosHomeSurfaceVisibility(
+                        pagerPosition = pagerState.currentPage + pagerState.currentPageOffsetFraction,
+                        homePageCount = homePageCount,
+                    )
+                    alpha = homeSurfaceVisibility
+                    translationY = (1f - homeSurfaceVisibility) * dockHiddenOffsetPx
+                    val scale = 0.96f + 0.04f * homeSurfaceVisibility
+                    scaleX = scale
+                    scaleY = scale
+                }
+        }
         if (composeHomeChrome) {
             DockBar(
                 dock = layout.dock,
@@ -1124,21 +1303,7 @@ fun HomeScreen(
                     }
                 },
                 onDragSessionEnded = ::endDragSession,
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .navigationBarsPadding()
-                    .padding(horizontal = 16.dp, vertical = 10.dp)
-                    .graphicsLayer {
-                        val homeSurfaceVisibility = iosHomeSurfaceVisibility(
-                            pagerPosition = pagerState.currentPage + pagerState.currentPageOffsetFraction,
-                            homePageCount = homePageCount,
-                        )
-                        alpha = homeSurfaceVisibility
-                        translationY = (1f - homeSurfaceVisibility) * dockHiddenOffsetPx
-                        val scale = 0.96f + 0.04f * homeSurfaceVisibility
-                        scaleX = scale
-                        scaleY = scale
-                    },
+                modifier = dockModifier,
             )
         }
 
@@ -1505,9 +1670,7 @@ fun HomeScreen(
         }
 
         Overlay.WidgetPicker -> {
-            val providers = remember(apps) { graph.widgetHost.installedProviders() }
             WidgetPickerSheet(
-                providers = providers,
                 onSelect = { provider ->
                     overlay = Overlay.None
                     onRequestWidget(provider)
@@ -1520,43 +1683,329 @@ fun HomeScreen(
     }
 }
 
+/** iOS のアラート風の名前変更ダイアログ。 */
 @Composable
 private fun RenameFolderDialog(
     currentName: String,
     onConfirm: (String) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    var name by remember { mutableStateOf(currentName) }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.action_rename)) },
-        text = {
-            OutlinedTextField(
-                value = name,
-                onValueChange = { name = it },
-                singleLine = true,
+    var field by remember {
+        mutableStateOf(TextFieldValue(currentName, selection = TextRange(currentName.length)))
+    }
+    val focusRequester = remember { FocusRequester() }
+    val accent = IosSystemBlue
+    val selectionColors = remember(accent) {
+        TextSelectionColors(
+            handleColor = accent,
+            backgroundColor = accent.copy(alpha = 0.35f),
+        )
+    }
+    Dialog(onDismissRequest = onDismiss) {
+        // Dialogは別ウィンドウなので、キーボード操作もこの中のものを使う。
+        val keyboard = LocalSoftwareKeyboardController.current
+        // 背面(壁紙ごと)をぼかせる間は透けるガラス、ぼかせない端末・省電力中は
+        // 背面の柄に文字が負けない濃さにする。
+        val backdropBlurred = rememberDialogWindowBackdropBlur()
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier
+                .width(IOS_ALERT_WIDTH)
+                .liquidGlass(
+                    shape = IosAlertShape,
+                    highlight = 0.9f,
+                    minOpacity = if (backdropBlurred) {
+                        MODAL_GLASS_MIN_OPACITY_BLURRED
+                    } else {
+                        MODAL_GLASS_MIN_OPACITY_OPAQUE
+                    },
+                )
+                .padding(start = 20.dp, end = 20.dp, top = 22.dp, bottom = 16.dp),
+        ) {
+            Text(
+                text = stringResource(R.string.action_rename),
+                color = GlassContentColor,
+                fontSize = 17.sp,
+                fontWeight = FontWeight.SemiBold,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth(),
             )
-        },
-        confirmButton = {
-            Button(onClick = { onConfirm(name) }) {
-                Text(stringResource(R.string.action_ok))
+            Spacer(Modifier.height(16.dp))
+            CompositionLocalProvider(LocalTextSelectionColors provides selectionColors) {
+                BasicTextField(
+                    value = field,
+                    onValueChange = { field = it },
+                    singleLine = true,
+                    textStyle = TextStyle(color = GlassContentColor, fontSize = 16.sp),
+                    cursorBrush = SolidColor(IosSystemBlue),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = { onConfirm(field.text) }),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .focusRequester(focusRequester),
+                    decorationBox = { innerTextField ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(LocalOhagiColors.current.controlFill, IosAlertFieldShape)
+                                .padding(start = 12.dp, end = 6.dp)
+                                .height(IOS_ALERT_FIELD_HEIGHT),
+                        ) {
+                            Box(modifier = Modifier.weight(1f)) { innerTextField() }
+                            if (field.text.isNotEmpty()) {
+                                val clearLabel = stringResource(R.string.action_clear_text)
+                                Icon(
+                                    imageVector = Icons.Rounded.Cancel,
+                                    contentDescription = clearLabel,
+                                    tint = GlassSecondaryContentColor,
+                                    modifier = Modifier
+                                        .size(IOS_ALERT_FIELD_HEIGHT)
+                                        .clickable(
+                                            interactionSource = null,
+                                            indication = null,
+                                            role = Role.Button,
+                                        ) { field = TextFieldValue("") }
+                                        .padding(9.dp),
+                                )
+                            }
+                        }
+                    },
+                )
             }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text(stringResource(R.string.action_cancel))
+            Spacer(Modifier.height(20.dp))
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                IosAlertButton(
+                    text = stringResource(R.string.action_cancel),
+                    emphasized = false,
+                    onClick = onDismiss,
+                    modifier = Modifier.weight(1f),
+                )
+                IosAlertButton(
+                    text = stringResource(R.string.action_ok),
+                    emphasized = true,
+                    onClick = { onConfirm(field.text) },
+                    modifier = Modifier.weight(1f),
+                )
             }
-        },
-    )
+        }
+        // iOS のアラート同様、開いた時点で入力欄へフォーカスしキーボードを出す。
+        // Dialogのウィンドウ接続前は失敗し得るため、失敗しても手動タップで入力できる。
+        LaunchedEffect(focusRequester) {
+            runCatching { focusRequester.requestFocus() }
+            keyboard?.show()
+        }
+    }
 }
 
+@Composable
+private fun IosAlertButton(
+    text: String,
+    emphasized: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = modifier
+            .height(IOS_ALERT_BUTTON_HEIGHT)
+            .clip(HomeCapsuleShape)
+            .background(LocalOhagiColors.current.controlFill)
+            .clickable(role = Role.Button, onClick = onClick),
+    ) {
+        Text(
+            text = text,
+            color = IosSystemBlue,
+            fontSize = 17.sp,
+            fontWeight = if (emphasized) FontWeight.SemiBold else FontWeight.Normal,
+            maxLines = 1,
+        )
+    }
+}
+
+/**
+ * ホーム下部の「検索」カプセル。iOS 26 同様、タップで App ライブラリの検索へ移る。
+ * [visibility] はページドットとのクロスフェード量で、描画フェーズでのみ読む。
+ */
+@Composable
+private fun HomeSearchPill(
+    enabled: Boolean,
+    visibility: () -> Float,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val description = stringResource(R.string.home_search_pill_description)
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressed by interactionSource.collectIsPressedAsState()
+    val pressScale = animateFloatAsState(
+        targetValue = if (pressed) 0.94f else 1f,
+        animationSpec = if (pressed) IosMotion.pressDownSpec else IosMotion.pressReleaseSpec,
+        label = "homeSearchPillPress",
+    )
+    // 横画面では PortraitStage ごと回るため、文字が縦書きに見える。虫眼鏡だけの丸ボタンにし、
+    // 記号だけ端末の向きへ立て直す。
+    val compact = LocalDeviceUprightRotation.current != 0f
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(5.dp, Alignment.CenterHorizontally),
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = modifier
+            .graphicsLayer {
+                val shown = visibility()
+                alpha = shown
+                val scale = pressScale.value * (0.94f + 0.06f * shown)
+                scaleX = scale
+                scaleY = scale
+            }
+            .then(
+                if (compact) {
+                    Modifier.size(HOME_SEARCH_PILL_HEIGHT)
+                } else {
+                    Modifier.height(HOME_SEARCH_PILL_HEIGHT)
+                },
+            )
+            .liquidGlass(if (compact) CircleShape else HomeCapsuleShape, highlight = 0.8f)
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                enabled = enabled,
+                role = Role.Button,
+                onClick = onClick,
+            )
+            .semantics { contentDescription = description }
+            .then(if (compact) Modifier else Modifier.padding(horizontal = 14.dp)),
+    ) {
+        Icon(
+            imageVector = Icons.Rounded.Search,
+            contentDescription = null,
+            tint = GlassContentColor,
+            modifier = Modifier
+                .size(15.dp)
+                .uprightWithDevice(),
+        )
+        if (!compact) {
+            Text(
+                text = stringResource(R.string.home_search_pill),
+                color = GlassContentColor,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                // 読み上げはボタン側の説明文だけにする。
+                modifier = Modifier.clearAndSetSemantics {},
+            )
+        }
+    }
+}
+
+/**
+ * 下部の「検索」カプセルとページドット。iOS 26 同様、静止中はカプセル、ページ送り中と
+ * アイコン移動中だけページドットを見せる。
+ * スクロール中かどうかをここで読み、切り替えのたびに HomeScreen 全体を再composeしない。
+ */
+@Composable
+private fun HomeSearchChrome(
+    pagerState: PagerState,
+    homePageCount: Int,
+    dragInProgress: Boolean,
+    backdropBlurEnabled: Boolean,
+    backdropBlurProgress: () -> Float,
+    dockHiddenOffsetPx: Float,
+    onSearch: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val showPageDots = homePageCount > 1 &&
+        (dragInProgress || pagerState.isScrollInProgress)
+    val pageDotsProgress = animateFloatAsState(
+        targetValue = if (showPageDots) 1f else 0f,
+        animationSpec = if (showPageDots) {
+            tween(durationMillis = IosMotion.QUICK_FADE_MS, easing = IosMotion.easeOut)
+        } else {
+            // 指を離した直後に戻すとちらつくため、ページ位置を読める間だけ残す。
+            tween(
+                durationMillis = IosMotion.STANDARD_FADE_MS,
+                delayMillis = HOME_PAGE_DOTS_LINGER_MS,
+                easing = IosMotion.easeOut,
+            )
+        },
+        label = "homePageDots",
+    )
+    // 挿入余白と overlayBackdropBlur は呼ぶたびに等しくない Modifier を返すため、
+    // スクロール開始・終了の再compositionで作り直さない。
+    val chromeModifier = remember(
+        pagerState,
+        homePageCount,
+        dockHiddenOffsetPx,
+        backdropBlurEnabled,
+        backdropBlurProgress,
+    ) {
+        Modifier
+            .navigationBarsPadding()
+            .padding(bottom = HOME_SEARCH_PILL_BOTTOM - HOME_CHROME_BLUR_MARGIN)
+            .graphicsLayer {
+                val homeSurfaceVisibility = iosHomeSurfaceVisibility(
+                    pagerPosition = pagerState.currentPage + pagerState.currentPageOffsetFraction,
+                    homePageCount = homePageCount,
+                )
+                alpha = homeSurfaceVisibility
+                translationY = (1f - homeSurfaceVisibility) * dockHiddenOffsetPx * 0.45f
+            }
+            .overlayBackdropBlur(
+                enabled = backdropBlurEnabled,
+                progress = backdropBlurProgress,
+            )
+            // ぼかしがカプセルの外へにじむ余地。RenderEffectはlayerの矩形で切られる。
+            .padding(HOME_CHROME_BLUR_MARGIN)
+    }
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = modifier.then(chromeModifier),
+    ) {
+        HomeSearchPill(
+            enabled = !showPageDots,
+            visibility = { 1f - pageDotsProgress.value },
+            onClick = onSearch,
+        )
+        if (homePageCount > 1) {
+            HomePageIndicator(
+                pageCount = homePageCount,
+                pagerState = pagerState,
+                visibility = { pageDotsProgress.value },
+            )
+        }
+    }
+}
+
+/**
+ * ホームのページ位置に応じたバックキーの扱い。1枚目以外では1枚目へ戻し、1枚目では
+ * 何もしない(ランチャーの標準挙動)。表示ページは真偽が変わった時だけ読み直す。
+ */
+@Composable
+private fun HomePagerBackHandlers(
+    pagerState: PagerState,
+    overlayOpen: Boolean,
+    onBackToPrimaryHome: () -> Unit,
+) {
+    val onPrimaryHome by remember(pagerState) {
+        derivedStateOf { pagerState.currentPage == PRIMARY_HOME_PAGER_INDEX }
+    }
+    BackHandler(enabled = !overlayOpen && !onPrimaryHome, onBack = onBackToPrimaryHome)
+    BackHandler(enabled = !overlayOpen && onPrimaryHome) { }
+}
+
+/**
+ * ページ送り中に検索カプセルと入れ替わるページドット。
+ * 小数ページ位置は描画フェーズでのみ読み、全ドットを1回のdrawで描く。
+ */
 @Composable
 private fun HomePageIndicator(
     pageCount: Int,
     pagerState: PagerState,
+    visibility: () -> Float,
     modifier: Modifier = Modifier,
 ) {
-    // 読み上げ内容は選択ページが変わった時だけ再計算し、小数位置は各dotのlayerで読む。
+    // 読み上げ内容は選択ページが変わった時だけ再計算する。
     val selectedPage by remember(pagerState, pageCount) {
         derivedStateOf {
             (pagerState.currentPage + pagerState.currentPageOffsetFraction - PRIMARY_HOME_PAGER_INDEX)
@@ -1568,41 +2017,66 @@ private fun HomePageIndicator(
         selectedPage + 1,
         pageCount,
     )
-    Row(
-        horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(6.dp),
-        verticalAlignment = Alignment.CenterVertically,
+    Box(
         modifier = modifier
+            .graphicsLayer {
+                val shown = visibility()
+                alpha = shown
+                val scale = 0.94f + 0.06f * shown
+                scaleX = scale
+                scaleY = scale
+            }
             .semantics { contentDescription = description }
-            .clip(RoundedCornerShape(12.dp))
-            .background(Color.Black.copy(alpha = 0.22f))
-            .padding(horizontal = 8.dp, vertical = 5.dp),
-    ) {
-        repeat(pageCount) { page ->
-            Box(
-                modifier = Modifier
-                    .size(7.dp)
-                    .graphicsLayer {
-                        val pagePosition = pagerState.currentPage +
-                            pagerState.currentPageOffsetFraction - PRIMARY_HOME_PAGER_INDEX
-                        val proximity = 1f - (page - pagePosition).absoluteValue.coerceIn(0f, 1f)
-                        alpha = 0.42f + 0.58f * proximity
-                        val scale = 0.86f + 0.14f * proximity
-                        scaleX = scale
-                        scaleY = scale
-                    }
-                    .clip(CircleShape)
-                    .background(Color.White),
-            )
-        }
-    }
+            .height(HOME_SEARCH_PILL_HEIGHT)
+            .liquidGlass(HomeCapsuleShape, highlight = 0.8f)
+            .padding(horizontal = 12.dp)
+            .width(HOME_PAGE_DOT_SIZE * pageCount + HOME_PAGE_DOT_SPACING * (pageCount - 1))
+            .drawBehind {
+                val pagePosition = pagerState.currentPage +
+                    pagerState.currentPageOffsetFraction - PRIMARY_HOME_PAGER_INDEX
+                val dot = HOME_PAGE_DOT_SIZE.toPx()
+                val step = dot + HOME_PAGE_DOT_SPACING.toPx()
+                val centerY = size.height / 2f
+                for (page in 0 until pageCount) {
+                    val proximity = 1f - (page - pagePosition).absoluteValue.coerceIn(0f, 1f)
+                    drawCircle(
+                        color = Color.White.copy(alpha = 0.38f + 0.62f * proximity),
+                        radius = dot / 2f * (0.86f + 0.14f * proximity),
+                        center = Offset(dot / 2f + page * step, centerY),
+                    )
+                }
+            },
+    )
 }
 
-/** ホームグリッド下部に確保するドック領域の高さ(ドック本体 84dp + 上下マージン)。 */
-private val HOME_GRID_BOTTOM_RESERVED = 104.dp
+/** Dock 本体の外側の余白(navigation bar の上)。 */
+private val DOCK_OUTER_MARGIN_HORIZONTAL = 16.dp
+private val DOCK_OUTER_MARGIN_VERTICAL = 10.dp
+private val HOME_SEARCH_PILL_HEIGHT = 30.dp
+private val HOME_SEARCH_PILL_GAP_ABOVE_DOCK = 10.dp
+/** navigation bar 上端から検索カプセル下端まで。Dock の上に一定の隙間で載せる。 */
+private val HOME_SEARCH_PILL_BOTTOM =
+    DOCK_OUTER_MARGIN_VERTICAL + DOCK_BAR_HEIGHT + HOME_SEARCH_PILL_GAP_ABOVE_DOCK
+/** ホームグリッド下部に確保する領域(Dock + 検索カプセル + 隙間。navigation bar は別途)。 */
+private val HOME_GRID_BOTTOM_RESERVED = HOME_SEARCH_PILL_BOTTOM + HOME_SEARCH_PILL_HEIGHT + 6.dp
+private val HOME_CHROME_BLUR_MARGIN = 8.dp
+private val HOME_PAGE_DOT_SIZE = 7.dp
+private val HOME_PAGE_DOT_SPACING = 8.dp
+private const val HOME_PAGE_DOTS_LINGER_MS = 420
+private const val BACKDROP_BLUR_FADE_MS = 260
+private val HomeCapsuleShape = RoundedCornerShape(50)
+private val IosAlertShape = ContinuousRoundedShape(28.dp)
+private val IosAlertFieldShape = ContinuousRoundedShape(10.dp)
+private val IOS_ALERT_WIDTH = 300.dp
+private val IOS_ALERT_FIELD_HEIGHT = 36.dp
+private val IOS_ALERT_BUTTON_HEIGHT = 46.dp
+
 /**
  * App ライブラリを端末の物理向きに合わせて丸ごと回す。
- * Activity は portrait 固定なので、横向き時は幅と高さを入れ替えた領域へ描画してから
- * 90 度回転し、分割起動の「2つ目のアプリを選択」と同じ横向きレイアウトとして見せる。
+ * Activity は回転を許可しているが、[io.github.hatake716.ohagi.ui.common.PortraitStage] が
+ * UI 全体を縦向きの寸法・配置のまま逆回転して描いている。App ライブラリだけは本当の
+ * 横レイアウトにしたいので、ここで幅と高さを入れ替えた領域へ描画してから直立補正角だけ
+ * 回し、PortraitStage の逆回転を打ち消す(分割起動の「2つ目のアプリを選択」と同じ見え方)。
  * ページ単位の切替のためアニメーションは行わない(向き確定でスナップ)。
  */
 @Composable
@@ -1627,7 +2101,6 @@ private fun RotateAppLibraryToDevice(content: @Composable () -> Unit) {
 private val HOME_PAGE_EDGE_ZONE = 36.dp
 /** fallbackドロップで「セルへ重ねてフォルダ化/追加」とみなすセル中心からの距離。 */
 private val HOME_FALLBACK_STACK_RADIUS = 34.dp
-private val HOME_PAGE_INDICATOR_BOTTOM = 100.dp
 private const val HOME_PAGE_EDGE_COOLDOWN_MS = 420L
 private const val APP_LIBRARY_PREFETCH_DELAY_MS = 260L
 private const val WIDGET_PAGER_INDEX = 0

@@ -4,23 +4,28 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.State
@@ -29,18 +34,24 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import io.github.hatake716.ohagi.ui.theme.Ink
-import io.github.hatake716.ohagi.ui.theme.Kome
+import androidx.compose.ui.unit.sp
+import io.github.hatake716.ohagi.ui.theme.LocalOhagiColors
 import kotlinx.coroutines.launch
 
 /** iOS のホームアイコンマスクに近づけるための丸角比率。 */
@@ -65,7 +76,11 @@ class IosDragVisualState internal constructor(
     val alpha: Float get() = sourceAlpha.value
 }
 
-fun iosIconShape(size: Dp) = RoundedCornerShape(size * IOS_ICON_CORNER_RATIO)
+/** iOS のアイコンマスク(連続曲率の角丸)。 */
+fun iosIconShape(size: Dp): Shape = ContinuousRoundedShape(size * IOS_ICON_CORNER_RATIO)
+
+/** アイコン・フォルダアイコンの影の輪郭。理由は [continuousShadowShape]。 */
+fun iosIconShadowShape(size: Dp): Shape = continuousShadowShape(size * IOS_ICON_CORNER_RATIO)
 
 val IosSheetShape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp)
 
@@ -169,7 +184,7 @@ fun rememberIosDragVisualState(
     }
 }
 
-/** ナビゲーションバー上で使う、半透明の丸いシンボルボタン。 */
+/** ナビゲーションバー上で使う、Liquid Glass の丸いシンボルボタン。 */
 @Composable
 fun IosGlassIconButton(
     imageVector: ImageVector,
@@ -194,9 +209,7 @@ fun IosGlassIconButton(
                 scaleX = scale
                 scaleY = scale
             }
-            .clip(CircleShape)
-            .background(Ink.copy(alpha = 0.36f))
-            .border(0.5.dp, Color.White.copy(alpha = 0.20f), CircleShape)
+            .liquidGlass(CircleShape, highlight = 0.85f)
             .clickable(
                 interactionSource = interactionSource,
                 indication = null,
@@ -210,13 +223,16 @@ fun IosGlassIconButton(
         Icon(
             imageVector = imageVector,
             contentDescription = null,
-            tint = Kome,
-            modifier = Modifier.size(size * 0.52f),
+            tint = GlassContentColor,
+            modifier = Modifier.size(size * 0.5f),
         )
     }
 }
 
-/** iOS の検索フィールドに寄せた、塗り型の丸角検索欄。 */
+/**
+ * iOS 26 の検索カプセル。Liquid Glass の丸い面に虫眼鏡とプレースホルダーを置き、
+ * 入力中だけ右端に消去ボタンを出す。
+ */
 @Composable
 fun IosSearchField(
     value: String,
@@ -224,63 +240,97 @@ fun IosSearchField(
     placeholder: String,
     clearContentDescription: String,
     modifier: Modifier = Modifier,
+    focusRequester: FocusRequester? = null,
 ) {
-    OutlinedTextField(
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val contentColor = GlassContentColor
+    val textStyle = remember(contentColor) {
+        TextStyle(
+            color = contentColor,
+            fontSize = 17.sp,
+            letterSpacing = (-0.2).sp,
+        )
+    }
+    BasicTextField(
         value = value,
         onValueChange = onValueChange,
         singleLine = true,
-        textStyle = MaterialTheme.typography.bodyLarge,
-        placeholder = { androidx.compose.material3.Text(placeholder) },
-        leadingIcon = {
-            Icon(
-                imageVector = Icons.Rounded.Search,
-                contentDescription = null,
-                modifier = Modifier.size(20.dp),
-            )
-        },
-        trailingIcon = if (value.isNotEmpty()) {
-            {
+        textStyle = textStyle,
+        cursorBrush = SolidColor(IosSystemBlue),
+        keyboardOptions = KeyboardOptions(
+            imeAction = ImeAction.Search,
+            autoCorrectEnabled = false,
+        ),
+        keyboardActions = KeyboardActions(onSearch = { keyboardController?.hide() }),
+        modifier = modifier
+            .height(IOS_SEARCH_FIELD_HEIGHT)
+            .liquidGlass(IosSearchFieldShape, highlight = 0.8f)
+            .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier),
+        decorationBox = { innerTextField ->
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(start = 14.dp, end = 6.dp),
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.Search,
+                    contentDescription = null,
+                    tint = GlassSecondaryContentColor,
+                    modifier = Modifier.size(20.dp),
+                )
+                Spacer(Modifier.width(8.dp))
                 Box(
-                    contentAlignment = Alignment.Center,
-                    modifier = Modifier
-                        .size(30.dp)
-                        .clip(CircleShape)
-                        .background(Kome.copy(alpha = 0.14f))
-                        .clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null,
-                        ) { onValueChange("") }
-                        .semantics {
-                            contentDescription = clearContentDescription
-                            role = Role.Button
-                        },
+                    contentAlignment = Alignment.CenterStart,
+                    modifier = Modifier.weight(1f),
                 ) {
-                    Icon(
-                        imageVector = Icons.Rounded.Close,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp),
-                    )
+                    if (value.isEmpty()) {
+                        Text(
+                            text = placeholder,
+                            style = textStyle,
+                            color = GlassSecondaryContentColor,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    innerTextField()
+                }
+                if (value.isNotEmpty()) {
+                    // iOS の xmark.circle.fill。当たり判定は32dp、見た目の円は18dp。
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier
+                            .size(32.dp)
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null,
+                            ) { onValueChange("") }
+                            .semantics {
+                                contentDescription = clearContentDescription
+                                role = Role.Button
+                            },
+                    ) {
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier
+                                .size(18.dp)
+                                .background(GlassSecondaryContentColor, CircleShape),
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Close,
+                                contentDescription = null,
+                                tint = LocalOhagiColors.current.backdrop,
+                                modifier = Modifier.size(12.dp),
+                            )
+                        }
+                    }
+                } else {
+                    Spacer(Modifier.width(8.dp))
                 }
             }
-        } else {
-            null
         },
-        shape = RoundedCornerShape(15.dp),
-        colors = OutlinedTextFieldDefaults.colors(
-            focusedTextColor = Kome,
-            unfocusedTextColor = Kome,
-            cursorColor = Kome,
-            focusedContainerColor = Kome.copy(alpha = 0.14f),
-            unfocusedContainerColor = Kome.copy(alpha = 0.10f),
-            focusedBorderColor = Kome.copy(alpha = 0.36f),
-            unfocusedBorderColor = Kome.copy(alpha = 0.16f),
-            focusedLeadingIconColor = Kome.copy(alpha = 0.72f),
-            unfocusedLeadingIconColor = Kome.copy(alpha = 0.62f),
-            focusedTrailingIconColor = Kome.copy(alpha = 0.78f),
-            unfocusedTrailingIconColor = Kome.copy(alpha = 0.70f),
-            focusedPlaceholderColor = Kome.copy(alpha = 0.58f),
-            unfocusedPlaceholderColor = Kome.copy(alpha = 0.52f),
-        ),
-        modifier = modifier,
     )
 }
+
+private val IOS_SEARCH_FIELD_HEIGHT = 44.dp
+private val IosSearchFieldShape = RoundedCornerShape(50)

@@ -3,6 +3,7 @@ package io.github.hatake716.ohagi
 import android.content.Context
 import androidx.compose.runtime.staticCompositionLocalOf
 import io.github.hatake716.ohagi.data.AppRepository
+import io.github.hatake716.ohagi.data.AppearanceRepository
 import io.github.hatake716.ohagi.data.LayoutRepository
 import io.github.hatake716.ohagi.data.UsageRepository
 import io.github.hatake716.ohagi.util.FilePinUtils
@@ -22,10 +23,12 @@ class Graph(context: Context) {
     val appRepository = AppRepository(appContext)
     val layoutRepository = LayoutRepository(appContext)
     val usageRepository = UsageRepository(appContext)
+    val appearanceRepository = AppearanceRepository(appContext)
     val widgetHost = WidgetHostController(appContext)
 
     fun start() {
         appRepository.startWatching()
+        appearanceRepository.start(scope)
         // 本当にアンインストールされたパッケージへの参照だけをレイアウトから掃除する。
         // ドロワー一覧に見えないだけ(更新中・無効化中・alias切替中など)のアプリは
         // PackageManager で実在確認し、削除しない。誤削除は恒久的なデータ喪失になるため。

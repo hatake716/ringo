@@ -8,19 +8,18 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.awaitLongPressOrCancellation
 import androidx.compose.runtime.Composable
+import io.github.hatake716.ohagi.ui.theme.LocalOhagiColors
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.RoundRect
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.input.pointer.changedToUp
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.semantics.onClick
@@ -36,6 +35,7 @@ import androidx.compose.ui.draganddrop.toAndroidDragEvent
 import io.github.hatake716.ohagi.data.AppRef
 import io.github.hatake716.ohagi.data.FolderLocation
 import io.github.hatake716.ohagi.ui.common.IOS_ICON_CORNER_RATIO
+import io.github.hatake716.ohagi.ui.common.addContinuousRoundedRect
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -231,6 +231,7 @@ fun Modifier.ohagiDragSource(
     val currentLift = rememberUpdatedState(onLift)
     val currentDragStarted = rememberUpdatedState(onDragStarted)
     val currentLongPressMenu = rememberUpdatedState(onLongPressMenu)
+    val folderColor = rememberUpdatedState(LocalOhagiColors.current.glassBase.copy(alpha = 0.94f))
 
     return dragAndDropSource(
         drawDragDecoration = {
@@ -238,7 +239,7 @@ fun Modifier.ohagiDragSource(
             if (latestFolderIcons.isEmpty()) {
                 drawOhagiDragDecoration(currentIcon.value)
             } else {
-                drawOhagiFolderDragDecoration(latestFolderIcons)
+                drawOhagiFolderDragDecoration(latestFolderIcons, folderColor.value)
             }
         },
         block = {
@@ -301,72 +302,61 @@ fun Modifier.ohagiDragSource(
     }
 }
 
+/** (0,0) 起点の iOS アイコン形状。装飾1回の描画中は位置を translate で変えて使い回す。 */
+private fun iosIconPath(side: Float): Path = Path().apply {
+    addContinuousRoundedRect(side, side, side * IOS_ICON_CORNER_RATIO)
+}
+
 private fun DrawScope.drawOhagiDragDecoration(icon: ImageBitmap?) {
     // 元アイコンより約1.1倍大きい半透明previewを、影の余白を残して指下へ浮かせる。
     val iconSize = min(size.minDimension * 0.94f, 76.dp.toPx())
     val left = (size.width - iconSize) / 2f
     val top = (size.height - iconSize) / 2f
-    val corner = iconSize * IOS_ICON_CORNER_RATIO
+    val shape = iosIconPath(iconSize)
     val farShadowOffset = min(5.dp.toPx(), (size.height - iconSize).coerceAtLeast(2f) / 2f)
     val nearShadowOffset = min(2.5.dp.toPx(), farShadowOffset * 0.55f)
 
     // DragDecorationではblurを使わず、広い影と接地影を重ねてiOSのlift感を近似する。
-    drawRoundRect(
-        color = Color.Black.copy(alpha = 0.11f),
-        topLeft = Offset(left, top + farShadowOffset),
-        size = Size(iconSize, iconSize),
-        cornerRadius = CornerRadius(corner, corner),
-    )
-    drawRoundRect(
-        color = Color.Black.copy(alpha = 0.25f),
-        topLeft = Offset(left, top + nearShadowOffset),
-        size = Size(iconSize, iconSize),
-        cornerRadius = CornerRadius(corner, corner),
-    )
+    translate(left, top + farShadowOffset) {
+        drawPath(shape, color = Color.Black.copy(alpha = 0.11f))
+    }
+    translate(left, top + nearShadowOffset) {
+        drawPath(shape, color = Color.Black.copy(alpha = 0.25f))
+    }
     if (icon != null) {
-        val clip = Path().apply {
-            addRoundRect(
-                RoundRect(
-                    left = left,
-                    top = top,
-                    right = left + iconSize,
-                    bottom = top + iconSize,
-                    cornerRadius = CornerRadius(corner, corner),
-                ),
-            )
+        // アプリアイコンはマスク済みだが、ファイルピンのサムネイルは任意の縦横比の矩形。
+        // 中央を正方形に切り出し、同じ形状でクリップして描く(装飾は1回しか描かれない)。
+        val side = min(icon.width, icon.height)
+        translate(left, top) {
+            clipPath(shape) {
+                drawImage(
+                    image = icon,
+                    srcOffset = IntOffset((icon.width - side) / 2, (icon.height - side) / 2),
+                    srcSize = IntSize(side, side),
+                    dstSize = IntSize(iconSize.roundToInt(), iconSize.roundToInt()),
+                    alpha = 0.97f,
+                )
+            }
         }
-        clipPath(clip) {
-            drawImage(
-                image = icon,
-                dstOffset = IntOffset(left.roundToInt(), top.roundToInt()),
-                dstSize = IntSize(iconSize.roundToInt(), iconSize.roundToInt()),
-                alpha = 0.97f,
-            )
-        }
-    } else {
-        drawRoundRect(
-            color = Color(0xFFE8D8C4),
-            topLeft = Offset(left, top),
-            size = Size(iconSize, iconSize),
-            cornerRadius = CornerRadius(corner, corner),
+    }
+    translate(left, top) {
+        if (icon == null) drawPath(shape, color = Color(0xFFE8D8C4))
+        drawPath(
+            shape,
+            color = Color.White.copy(alpha = 0.20f),
+            style = Stroke(width = 0.75.dp.toPx()),
         )
     }
-    drawRoundRect(
-        color = Color.White.copy(alpha = 0.20f),
-        topLeft = Offset(left, top),
-        size = Size(iconSize, iconSize),
-        cornerRadius = CornerRadius(corner, corner),
-        style = Stroke(width = 0.75.dp.toPx()),
-    )
 }
 
 /** フォルダ本体を移動中も、単体アプリではなく3×3プレビューの影を表示する。 */
-private fun DrawScope.drawOhagiFolderDragDecoration(icons: List<ImageBitmap?>) {
+private fun DrawScope.drawOhagiFolderDragDecoration(icons: List<ImageBitmap?>, background: Color) {
     val folderSize = min(size.minDimension * 0.94f, 76.dp.toPx())
     val left = (size.width - folderSize) / 2f
     val top = (size.height - folderSize) / 2f
-    val corner = folderSize * IOS_ICON_CORNER_RATIO
+    val folderShape = iosIconPath(folderSize)
     val miniSize = folderSize * 0.205f
+    val miniShape = iosIconPath(miniSize)
     val spacing = folderSize * 0.055f
     val contentSize = miniSize * 3f + spacing * 2f
     val contentLeft = left + (folderSize - contentSize) / 2f
@@ -374,69 +364,44 @@ private fun DrawScope.drawOhagiFolderDragDecoration(icons: List<ImageBitmap?>) {
 
     val farShadowOffset = min(5.dp.toPx(), (size.height - folderSize).coerceAtLeast(2f) / 2f)
     val nearShadowOffset = min(2.5.dp.toPx(), farShadowOffset * 0.55f)
-    drawRoundRect(
-        color = Color.Black.copy(alpha = 0.11f),
-        topLeft = Offset(left, top + farShadowOffset),
-        size = Size(folderSize, folderSize),
-        cornerRadius = CornerRadius(corner, corner),
-    )
-    drawRoundRect(
-        color = Color.Black.copy(alpha = 0.23f),
-        topLeft = Offset(left, top + nearShadowOffset),
-        size = Size(folderSize, folderSize),
-        cornerRadius = CornerRadius(corner, corner),
-    )
-    drawRoundRect(
-        color = Color(0xCC55575E),
-        topLeft = Offset(left, top),
-        size = Size(folderSize, folderSize),
-        cornerRadius = CornerRadius(corner, corner),
-    )
+    translate(left, top + farShadowOffset) {
+        drawPath(folderShape, color = Color.Black.copy(alpha = 0.11f))
+    }
+    translate(left, top + nearShadowOffset) {
+        drawPath(folderShape, color = Color.Black.copy(alpha = 0.23f))
+    }
+    translate(left, top) {
+        drawPath(folderShape, color = background)
+    }
 
     repeat(9) { index ->
         val row = index / 3
         val column = index % 3
         val miniLeft = contentLeft + column * (miniSize + spacing)
         val miniTop = contentTop + row * (miniSize + spacing)
-        val miniCorner = miniSize * IOS_ICON_CORNER_RATIO
         val bitmap = icons.getOrNull(index)
         if (bitmap == null) {
             if (index < icons.size) {
-                drawRoundRect(
-                    color = Color.White.copy(alpha = 0.12f),
-                    topLeft = Offset(miniLeft, miniTop),
-                    size = Size(miniSize, miniSize),
-                    cornerRadius = CornerRadius(miniCorner, miniCorner),
-                )
+                translate(miniLeft, miniTop) {
+                    drawPath(miniShape, color = Color.White.copy(alpha = 0.12f))
+                }
             }
         } else {
-            val clip = Path().apply {
-                addRoundRect(
-                    RoundRect(
-                        left = miniLeft,
-                        top = miniTop,
-                        right = miniLeft + miniSize,
-                        bottom = miniTop + miniSize,
-                        cornerRadius = CornerRadius(miniCorner, miniCorner),
-                    ),
-                )
-            }
-            clipPath(clip) {
-                drawImage(
-                    image = bitmap,
-                    dstOffset = IntOffset(miniLeft.roundToInt(), miniTop.roundToInt()),
-                    dstSize = IntSize(miniSize.roundToInt(), miniSize.roundToInt()),
-                    alpha = 0.97f,
-                )
-            }
+            // ミニアイコンもマスク済みビットマップなので、クリップせずに描く。
+            drawImage(
+                image = bitmap,
+                dstOffset = IntOffset(miniLeft.roundToInt(), miniTop.roundToInt()),
+                dstSize = IntSize(miniSize.roundToInt(), miniSize.roundToInt()),
+                alpha = 0.97f,
+            )
         }
     }
 
-    drawRoundRect(
-        color = Color.White.copy(alpha = 0.25f),
-        topLeft = Offset(left, top),
-        size = Size(folderSize, folderSize),
-        cornerRadius = CornerRadius(corner, corner),
-        style = Stroke(width = 0.75.dp.toPx()),
-    )
+    translate(left, top) {
+        drawPath(
+            folderShape,
+            color = Color.White.copy(alpha = 0.25f),
+            style = Stroke(width = 0.75.dp.toPx()),
+        )
+    }
 }

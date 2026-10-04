@@ -1,34 +1,70 @@
 <?xml version="1.0" encoding="utf-8"?>
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- おはぎ本体(あんこ) -->
+    <!-- The fruit, stem and leaf stay inside the adaptive icon safe zone. -->
     <path
-        android:fillColor="#5C3A41"
-        android:pathData="M54,32c-15,0 -26,9.5 -26,21.5C28,66 39,76 54,76c15,0 26,-10 26,-22.5C80,41.5 69,32 54,32z" />
-    <!-- あんこのつや -->
+        android:fillColor="#00000000"
+        android:strokeColor="#576939"
+        android:strokeWidth="3.4"
+        android:strokeLineCap="round"
+        android:pathData="M54,42 C54,36 52.5,32 49.5,29" />
+    <!-- A whole green apple with a softly lobed base. -->
     <path
-        android:fillColor="#6E464E"
-        android:pathData="M54,36c-11,0 -19,6.5 -19,15c0,2 0.5,3.9 1.4,5.6C39.6,49 46,44 54,44c8,0 14.4,5 17.6,12.6C72.5,54.9 73,53 73,51C73,42.5 65,36 54,36z" />
-    <!-- ごま/米粒 -->
+        android:pathData="M54,40 C48,40 46,36 40,36 C30,36 26,44 27,54 C28,66 35,80 44,80 C48.5,80 51,77.5 54,77.5 C57,77.5 59.5,80 64,80 C73,80 80,66 81,54 C82,44 78,36 68,36 C62,36 60,40 54,40 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="linear"
+                android:startX="35"
+                android:startY="37"
+                android:endX="72"
+                android:endY="79">
+                <item android:offset="0" android:color="#D4EF65" />
+                <item android:offset="0.42" android:color="#92D63F" />
+                <item android:offset="1" android:color="#36A653" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <!-- Subtle lower contour and a broad, soft glint keep small icons legible. -->
     <path
-        android:fillColor="#F3EAD7"
-        android:pathData="M44,48a2.2,1.4 30,1 0,0.1 0z" />
+        android:fillColor="#238345"
+        android:fillAlpha="0.16"
+        android:pathData="M29,62 C36,73 44,75 54,73 C64,76 73,71 79,62 C76,72 70,80 64,80 C59.5,80 57,77.5 54,77.5 C51,77.5 48.5,80 44,80 C38,80 32,72 29,62 Z" />
     <path
-        android:fillColor="#F3EAD7"
-        android:pathData="M58,44a2.2,1.4 -20,1 0,0.1 0z" />
+        android:pathData="M33,51 C33.5,44 38,40 43,41 C46,41.5 46,44 43,45 C38,47 36,51 35,55 C34,57 32.5,55 33,51 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="linear"
+                android:startX="37"
+                android:startY="41"
+                android:endX="36"
+                android:endY="57">
+                <item android:offset="0" android:color="#CFFFFFF2" />
+                <item android:offset="1" android:color="#00FFFFF2" />
+            </gradient>
+        </aapt:attr>
+    </path>
     <path
-        android:fillColor="#F3EAD7"
-        android:pathData="M66,54a2.2,1.4 45,1 0,0.1 0z" />
+        android:pathData="M55,34 C56,27 62,23 71,24 C70,32 65,37 55,34 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="linear"
+                android:startX="59"
+                android:startY="25"
+                android:endX="66"
+                android:endY="36"
+                android:startColor="#55AC58"
+                android:endColor="#23764C" />
+        </aapt:attr>
+    </path>
     <path
-        android:fillColor="#F3EAD7"
-        android:pathData="M50,60a2.2,1.4 -40,1 0,0.1 0z" />
-    <path
-        android:fillColor="#F3EAD7"
-        android:pathData="M61,63a2.2,1.4 15,1 0,0.1 0z" />
-    <path
-        android:fillColor="#F3EAD7"
-        android:pathData="M40,56a2.2,1.4 70,1 0,0.1 0z" />
+        android:fillColor="#00000000"
+        android:strokeColor="#C4E98B"
+        android:strokeAlpha="0.55"
+        android:strokeWidth="1"
+        android:strokeLineCap="round"
+        android:pathData="M58,33 C61,30 64,28 67,27" />
 </vector>

@@ -1,11 +1,8 @@
 package io.github.hatake716.ohagi.ui.common
 
-import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,19 +14,21 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.drawOutline
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.dp
 import io.github.hatake716.ohagi.data.AppRef
 
 /**
  * iPhoneのホームフォルダを意識した3×3プレビュー。
- * 先頭ページの最大9アプリを、半透明の角丸コンテナ内へ並べる。
+ * 先頭ページの最大9アプリを、壁紙の色を拾う曇りガラスの中へ並べる。
+ *
+ * ミニアイコンの格子(3×0.205 + 2×0.055 = 0.725倍)は内側余白を除いた0.80倍の
+ * 領域に収まり、角の連続曲率(対角で約0.066倍)にも掛からないため、
+ * コンテナのクリップ(レイヤー)は使わない。
  */
 @Composable
 fun IosFolderIcon(
@@ -39,22 +38,21 @@ fun IosFolderIcon(
     highlighted: Boolean = false,
     preloadedIcons: List<ImageBitmap?>? = null,
 ) {
-    val shape = iosIconShape(size)
+    val iconShape = iosIconShape(size)
+    val shadowShape = iosIconShadowShape(size)
     val scale by animateFloatAsState(
         // セル全体のtarget拡大と組み合わせ、合成後がおよそ1.12倍に収まる値。
         targetValue = if (highlighted) 1.05f else 1f,
         animationSpec = spring(dampingRatio = 0.68f, stiffness = 520f),
         label = "iosFolderTargetScale",
     )
-    val borderColor by animateColorAsState(
-        targetValue = if (highlighted) {
-            Color.White.copy(alpha = 0.72f)
-        } else {
-            Color.White.copy(alpha = 0.22f)
-        },
+    // 値は描画フェーズで読み、ハイライト中もホーム/Dockのセルを再composeしない。
+    val targetGlow = animateFloatAsState(
+        targetValue = if (highlighted) 1f else 0f,
         animationSpec = tween(durationMillis = 130),
-        label = "iosFolderBorder",
+        label = "iosFolderTargetGlow",
     )
+    val shadowElevation = size * 0.045f
     val miniSize = size * 0.205f
     val spacing = size * 0.055f
 
@@ -65,25 +63,26 @@ fun IosFolderIcon(
             .graphicsLayer {
                 scaleX = scale
                 scaleY = scale
+                // 影もこの1枚のレイヤーで落とし、フォルダごとのレイヤーを増やさない。
+                this.shadowElevation = shadowElevation.toPx()
+                shape = shadowShape
+                clip = false
+                ambientShadowColor = FOLDER_AMBIENT_SHADOW
+                spotShadowColor = FOLDER_SPOT_SHADOW
             }
-            .shadow(
-                elevation = size * 0.045f,
-                shape = shape,
-                clip = false,
-                ambientColor = Color.Black.copy(alpha = 0.20f),
-                spotColor = Color.Black.copy(alpha = 0.26f),
-            )
-            .clip(shape)
-            .background(
-                Brush.linearGradient(
-                    colors = if (highlighted) {
-                        listOf(Color(0xB3FFFFFF), Color(0x8AC9CAD0))
-                    } else {
-                        listOf(Color(0x8FFFFFFF), Color(0x703F4148))
-                    },
-                ),
-            )
-            .border(0.75.dp, borderColor, shape)
+            .liquidGlass(iconShape, GlassTone.Light)
+            .drawWithCache {
+                val outline = iconShape.createOutline(this.size, layoutDirection, this)
+                onDrawBehind {
+                    val glow = targetGlow.value
+                    if (glow > 0f) {
+                        drawOutline(
+                            outline,
+                            Color.White.copy(alpha = FOLDER_TARGET_GLOW_ALPHA * glow),
+                        )
+                    }
+                }
+            }
             .padding(size * 0.10f),
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(spacing)) {
@@ -97,9 +96,10 @@ fun IosFolderIcon(
                             AppIconImage(
                                 icon = preloadedIcons.getOrNull(row * 3 + column),
                                 size = miniSize,
+                                decorated = false,
                             )
                         } else {
-                            AppIcon(app = app, size = miniSize)
+                            FolderMiniIcon(app = app, size = miniSize)
                         }
                     }
                 }
@@ -107,3 +107,19 @@ fun IosFolderIcon(
         }
     }
 }
+
+/**
+ * ミニアイコンはRepository側で角丸済みのBitmapをそのまま描く。
+ * 装飾(影・クリップ)を付けると1フォルダあたり最大18枚のレイヤーになるため避ける。
+ */
+@Composable
+private fun FolderMiniIcon(app: AppRef, size: Dp) {
+    val icon by rememberAppIconBitmap(app, size)
+    AppIconImage(icon = icon, size = size, decorated = false)
+}
+
+private val FOLDER_AMBIENT_SHADOW = Color.Black.copy(alpha = 0.20f)
+private val FOLDER_SPOT_SHADOW = Color.Black.copy(alpha = 0.26f)
+
+/** フォルダ化targetになったときに曇りガラスへ重ねる白の強さ。 */
+private const val FOLDER_TARGET_GLOW_ALPHA = 0.24f

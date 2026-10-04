@@ -17,10 +17,15 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.SideEffect
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.core.view.WindowCompat
 import androidx.compose.ui.Modifier
 import io.github.hatake716.ohagi.data.AppRef
 import io.github.hatake716.ohagi.ui.common.SplitAppPickerScreen
-import io.github.hatake716.ohagi.ui.theme.Ink
+import io.github.hatake716.ohagi.ui.theme.LocalOhagiColors
+import io.github.hatake716.ohagi.ui.common.LocalGlassAppearance
+import io.github.hatake716.ohagi.ui.common.rememberGlassAppearance
 import io.github.hatake716.ohagi.ui.theme.OhagiTheme
 import io.github.hatake716.ohagi.util.LaunchUtils
 
@@ -64,13 +69,26 @@ class SplitLaunchActivity : ComponentActivity() {
         val graph = (application as OhagiApp).graph
         graph.appRepository.refreshIfStale()
         setContent {
-            OhagiTheme {
-                CompositionLocalProvider(LocalGraph provides graph) {
+            val appearanceReady by graph.appearanceRepository.loaded.collectAsStateWithLifecycle()
+            val mode by graph.appearanceRepository.themeMode.collectAsStateWithLifecycle()
+            if (!appearanceReady) return@setContent
+            OhagiTheme(mode = mode) {
+                val colors = LocalOhagiColors.current
+                SideEffect {
+                    WindowCompat.getInsetsController(window, window.decorView).apply {
+                        isAppearanceLightStatusBars = !colors.isDark
+                        isAppearanceLightNavigationBars = !colors.isDark
+                    }
+                }
+                CompositionLocalProvider(
+                    LocalGraph provides graph,
+                    LocalGlassAppearance provides rememberGlassAppearance(graph.appearanceRepository),
+                ) {
                     if (launchingSplit) {
                         Box(
                             modifier = Modifier
                                 .fillMaxSize()
-                                .background(Ink),
+                                .background(colors.backdrop),
                         )
                     } else {
                         SplitAppPickerScreen(

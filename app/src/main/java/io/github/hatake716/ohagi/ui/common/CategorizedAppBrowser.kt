@@ -8,7 +8,6 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -16,12 +15,16 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -29,7 +32,6 @@ import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Apps
 import androidx.compose.material.icons.rounded.CheckCircle
@@ -37,20 +39,21 @@ import androidx.compose.material.icons.rounded.SearchOff
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.focus.FocusManager
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.layout.boundsInRoot
-import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -59,6 +62,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -67,8 +71,7 @@ import io.github.hatake716.ohagi.data.AppCategory
 import io.github.hatake716.ohagi.data.AppIconRequest
 import io.github.hatake716.ohagi.data.AppInfo
 import io.github.hatake716.ohagi.data.AppRef
-import io.github.hatake716.ohagi.ui.theme.Ink
-import io.github.hatake716.ohagi.ui.theme.Kome
+import io.github.hatake716.ohagi.ui.theme.LocalOhagiColors
 
 private sealed interface AppBrowserMode {
     data object Overview : AppBrowserMode
@@ -79,9 +82,9 @@ private sealed interface AppBrowserMode {
 /**
  * 通常ドロワーと全アプリピッカーで共有する、iOS App Library 風ブラウザー。
  *
- * - 通常時: よく使うアプリの独立カード + 2列の自動カテゴリーカード
- * - カテゴリー選択時: そのカテゴリーだけの4列グリッド
- * - 検索時: 全カテゴリー横断の4列グリッド
+ * - 通常時: よく使うアプリの独立カード + 自動カテゴリーカード(縦画面は2列、幅に応じて増やす)
+ * - カテゴリー選択時: そのカテゴリーだけのグリッド(縦画面は4列)
+ * - 検索時: 全カテゴリー横断のグリッド(縦画面は4列)
  */
 @Composable
 fun CategorizedAppBrowser(
@@ -202,30 +205,42 @@ fun CategorizedAppBrowser(
                 // 可視カード数だけSubcomposeを発生させる。グリッド幅から1回だけ
                 // 実寸を計算し、全カードへ共有する。
                 BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                    val columns = appLibraryCategoryColumns(maxWidth)
                     val cardWidth = (
                         maxWidth -
                             CATEGORY_GRID_HORIZONTAL_PADDING * 2 -
-                            CATEGORY_GRID_GAP
-                        ) / 2
+                            CATEGORY_GRID_GAP * (columns - 1)
+                        ) / columns
+                    // 先読み(HomeScreen)は APP_LIBRARY_PREVIEW_ICON_SIZE で画像を用意するため、
+                    // 一般的な幅の端末ではこの上限に張り付く寸法にしておく。3列以上は
+                    // カード幅が CATEGORY_CARD_FULL_ICON_WIDTH 以上になる列数だけを選ぶ。
                     val previewIconSize = minOf(
                         APP_LIBRARY_PREVIEW_ICON_SIZE,
                         (
                             cardWidth -
-                                CATEGORY_CARD_HORIZONTAL_PADDING * 2 -
+                                CATEGORY_CARD_MIN_PADDING * 2 -
                                 APP_LIBRARY_PREVIEW_ICON_GAP
                             ) / 2,
                     ).coerceAtLeast(1.dp)
 
+                    // 横に広い時は「よく使うアプリ」を1行にして、カテゴリーカードを
+                    // 最初の画面に入れる。
+                    val frequentColumns = if (columns >= WIDE_CATEGORY_COLUMNS) {
+                        FREQUENT_APP_LIMIT
+                    } else {
+                        FREQUENT_APP_COLUMNS
+                    }
+
                     LazyVerticalGrid(
-                        columns = GridCells.Fixed(2),
+                        columns = GridCells.Fixed(columns),
                         contentPadding = PaddingValues(
                             start = CATEGORY_GRID_HORIZONTAL_PADDING,
                             end = CATEGORY_GRID_HORIZONTAL_PADDING,
-                            top = 8.dp,
+                            top = 10.dp,
                             bottom = 28.dp,
                         ),
                         horizontalArrangement = Arrangement.spacedBy(CATEGORY_GRID_GAP),
-                        verticalArrangement = Arrangement.spacedBy(CATEGORY_GRID_GAP),
+                        verticalArrangement = Arrangement.spacedBy(CATEGORY_GRID_ROW_GAP),
                         modifier = Modifier.fillMaxSize(),
                     ) {
                         if (overview.frequentApps.isNotEmpty()) {
@@ -236,6 +251,7 @@ fun CategorizedAppBrowser(
                             ) {
                                 FrequentAppsCard(
                                     apps = overview.frequentApps,
+                                    columns = frequentColumns,
                                     selectedApps = selectedApps,
                                     onAppClick = onPreviewAppClick,
                                 )
@@ -267,11 +283,12 @@ fun CategorizedAppBrowser(
 @Composable
 private fun FrequentAppsCard(
     apps: List<AppInfo>,
+    columns: Int,
     selectedApps: Set<AppRef>,
     onAppClick: (AppInfo, Rect?) -> Unit,
 ) {
     val visibleApps = remember(apps) { apps.take(FREQUENT_APP_LIMIT) }
-    val appRows = remember(visibleApps) { visibleApps.chunked(FREQUENT_APP_COLUMNS) }
+    val appRows = remember(visibleApps, columns) { visibleApps.chunked(columns) }
     val density = LocalDensity.current
     val iconRequests = remember(visibleApps, density.density) {
         val iconSizePx = with(density) { FREQUENT_APP_ICON_SIZE.roundToPx() }
@@ -279,32 +296,28 @@ private fun FrequentAppsCard(
     }
     val icons by rememberRequestedAppIconBitmaps(iconRequests)
 
+    // 中身は余白の内側に収まるのでclipしない(カードごとのレイヤーを作らない)。
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(24.dp))
-            .background(Color.White.copy(alpha = 0.105f))
-            .border(
-                width = 0.5.dp,
-                color = Color.White.copy(alpha = 0.16f),
-                shape = RoundedCornerShape(24.dp),
-            )
-            .padding(horizontal = 12.dp, vertical = 10.dp),
+            .liquidGlass(AppLibraryCardShape)
+            .padding(horizontal = 12.dp, vertical = 12.dp),
     ) {
         Text(
             text = stringResource(R.string.frequent_apps_title),
-            color = Kome,
+            color = GlassContentColor,
             fontSize = 15.sp,
             fontWeight = FontWeight.SemiBold,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(horizontal = 4.dp),
         )
         Spacer(Modifier.height(8.dp))
         appRows.forEachIndexed { rowIndex, rowApps ->
             if (rowIndex > 0) Spacer(Modifier.height(6.dp))
             Row(modifier = Modifier.fillMaxWidth()) {
-                repeat(FREQUENT_APP_COLUMNS) { column ->
-                    val index = rowIndex * FREQUENT_APP_COLUMNS + column
+                repeat(columns) { column ->
+                    val index = rowIndex * columns + column
                     val app = rowApps.getOrNull(column)
                     if (app == null) {
                         Spacer(Modifier.weight(1f))
@@ -331,7 +344,7 @@ private fun FrequentAppCell(
     onClick: (Rect?) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var iconBounds by remember(app.ref) { androidx.compose.runtime.mutableStateOf<Rect?>(null) }
+    val iconBounds = rememberLayoutBoundsHolder()
     val interactionSource = remember(app.ref) { MutableInteractionSource() }
     val pressed by interactionSource.collectIsPressedAsState()
     val scale by rememberIosPressScale(
@@ -349,14 +362,14 @@ private fun FrequentAppCell(
             .clickable(
                 interactionSource = interactionSource,
                 indication = null,
-                onClick = { onClick(iconBounds) },
+                onClick = { onClick(iconBounds.boundsInRoot()) },
             )
             .padding(horizontal = 2.dp, vertical = 4.dp),
     ) {
         Box(
             modifier = Modifier
                 .size(FREQUENT_APP_ICON_SIZE)
-                .onGloballyPositioned { iconBounds = it.boundsInRoot() }
+                .trackLayoutBounds(iconBounds)
                 .drawWithContent {
                     scale(scaleX = scale, scaleY = scale) {
                         this@drawWithContent.drawContent()
@@ -375,15 +388,14 @@ private fun FrequentAppCell(
                     modifier = Modifier
                         .align(Alignment.TopEnd)
                         .size(20.dp)
-                        .clip(CircleShape)
-                        .background(Ink),
+                        .background(LocalOhagiColors.current.backdrop, CircleShape),
                 )
             }
         }
         Spacer(Modifier.height(5.dp))
         Text(
             text = app.label,
-            color = Kome,
+            color = GlassContentColor,
             fontSize = 11.sp,
             textAlign = TextAlign.Center,
             maxLines = 1,
@@ -423,25 +435,34 @@ private fun AppGrid(
             contentAlignment = Alignment.Center,
             modifier = modifier.fillMaxSize(),
         ) {
-            Icon(
-                imageVector = Icons.Rounded.SearchOff,
-                contentDescription = stringResource(R.string.category_no_apps),
-                tint = Kome.copy(alpha = 0.45f),
-                modifier = Modifier.size(48.dp),
-            )
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Icon(
+                    imageVector = Icons.Rounded.SearchOff,
+                    contentDescription = null,
+                    tint = GlassSecondaryContentColor,
+                    modifier = Modifier.size(44.dp),
+                )
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    text = stringResource(R.string.category_no_apps),
+                    color = GlassSecondaryContentColor,
+                    fontSize = 15.sp,
+                    textAlign = TextAlign.Center,
+                )
+            }
         }
         return
     }
 
     LazyVerticalGrid(
-        columns = GridCells.Fixed(4),
+        columns = AppGridColumns,
         contentPadding = PaddingValues(
             start = 12.dp,
             end = 12.dp,
             top = 8.dp,
             bottom = 28.dp,
         ),
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        horizontalArrangement = Arrangement.spacedBy(APP_GRID_GAP),
         verticalArrangement = Arrangement.spacedBy(8.dp),
         modifier = modifier,
     ) {
@@ -463,7 +484,6 @@ private fun CategoryCard(
     onOpenCategory: () -> Unit,
     onAppClick: (AppInfo, Rect?) -> Unit,
 ) {
-    val cardShape = RoundedCornerShape(24.dp)
     val interactionSource = remember { MutableInteractionSource() }
     val pressed by interactionSource.collectIsPressedAsState()
     val scale by rememberIosPressScale(
@@ -495,74 +515,81 @@ private fun CategoryCard(
     }
     val previewIcons by rememberRequestedAppIconBitmaps(iconRequests)
 
+    // iOS の Appライブラリと同じく、正方形のガラスカードの下にカテゴリー名を置く。
+    // 名前もカードと同じクリック領域に含め、カードのsemanticsへ従来どおり統合する。
+    // カードはclipしない(中身は余白の内側に収まるため、カードごとのレイヤーを作らない)。
     Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier
             .fillMaxWidth()
-            .height(190.dp)
             .drawWithContent {
                 scale(scaleX = scale, scaleY = scale) { this@drawWithContent.drawContent() }
             }
-            .clip(cardShape)
-            .background(Color.White.copy(alpha = 0.105f))
-            .border(0.5.dp, Color.White.copy(alpha = 0.16f), cardShape)
             .clickable(
                 interactionSource = interactionSource,
                 indication = null,
                 onClick = onOpenCategory,
-            )
-            .padding(horizontal = CATEGORY_CARD_HORIZONTAL_PADDING, vertical = 10.dp),
+            ),
     ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.fillMaxWidth(),
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(1f)
+                .liquidGlass(AppLibraryCardShape),
         ) {
-            Text(
-                text = title,
-                color = Kome,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.fillMaxWidth(),
-            )
-        }
-        Spacer(Modifier.height(6.dp))
-        Column {
-            PreviewRow(
-                apps = apps.take(2),
-                icons = previewIcons.take(2),
-                selectedApps = selectedApps,
-                onAppClick = onAppClick,
-                iconSize = previewIconSize,
-            )
-            Spacer(Modifier.height(6.dp))
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(
-                    space = APP_LIBRARY_PREVIEW_ICON_GAP,
-                    alignment = Alignment.CenterHorizontally,
-                ),
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.fillMaxWidth(),
+            Column(
+                verticalArrangement = Arrangement.spacedBy(APP_LIBRARY_PREVIEW_ICON_GAP),
             ) {
-                apps.getOrNull(2)?.let { app ->
-                    CategoryPreviewIcon(
-                        app = app,
-                        icon = previewIcons.getOrNull(2),
-                        selected = app.ref in selectedApps,
-                        onClick = { bounds -> onAppClick(app, bounds) },
-                        size = previewIconSize,
-                    )
-                } ?: PreviewPlaceholder(previewIconSize)
-                MiniPreviewCluster(
-                    title = title,
-                    apps = apps.drop(3).take(4),
-                    icons = previewIcons.drop(3),
-                    onClick = onOpenCategory,
-                    size = previewIconSize,
-                    miniIconSize = miniIconSize,
+                PreviewRow(
+                    apps = apps.take(2),
+                    icons = previewIcons.take(2),
+                    selectedApps = selectedApps,
+                    onAppClick = onAppClick,
+                    iconSize = previewIconSize,
                 )
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(
+                        space = APP_LIBRARY_PREVIEW_ICON_GAP,
+                        alignment = Alignment.CenterHorizontally,
+                    ),
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    apps.getOrNull(2)?.let { app ->
+                        CategoryPreviewIcon(
+                            app = app,
+                            icon = previewIcons.getOrNull(2),
+                            selected = app.ref in selectedApps,
+                            onClick = { bounds -> onAppClick(app, bounds) },
+                            size = previewIconSize,
+                        )
+                    } ?: PreviewPlaceholder(previewIconSize)
+                    MiniPreviewCluster(
+                        title = title,
+                        apps = apps.drop(3).take(4),
+                        icons = previewIcons.drop(3),
+                        onClick = onOpenCategory,
+                        size = previewIconSize,
+                        miniIconSize = miniIconSize,
+                    )
+                }
             }
         }
+        Spacer(Modifier.height(6.dp))
+        Text(
+            text = title,
+            color = GlassSecondaryContentColor,
+            fontSize = 13.sp,
+            lineHeight = 16.sp,
+            fontWeight = FontWeight.Medium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 4.dp),
+        )
     }
 }
 
@@ -604,7 +631,7 @@ private fun CategoryPreviewIcon(
     onClick: (Rect?) -> Unit,
     size: Dp,
 ) {
-    var iconBounds by remember(app.ref) { androidx.compose.runtime.mutableStateOf<Rect?>(null) }
+    val iconBounds = rememberLayoutBoundsHolder()
     val interactionSource = remember(app.ref) { MutableInteractionSource() }
     val pressed by interactionSource.collectIsPressedAsState()
     val scale by rememberIosPressScale(
@@ -614,7 +641,7 @@ private fun CategoryPreviewIcon(
     Box(
         modifier = Modifier
             .size(size)
-            .onGloballyPositioned { iconBounds = it.boundsInRoot() }
+            .trackLayoutBounds(iconBounds)
             .drawWithContent {
                 scale(scaleX = scale, scaleY = scale) { this@drawWithContent.drawContent() }
             }
@@ -625,7 +652,7 @@ private fun CategoryPreviewIcon(
             .clickable(
                 interactionSource = interactionSource,
                 indication = null,
-                onClick = { onClick(iconBounds) },
+                onClick = { onClick(iconBounds.boundsInRoot()) },
             ),
     ) {
         AppIconImage(icon = icon, size = size, decorated = false)
@@ -637,8 +664,7 @@ private fun CategoryPreviewIcon(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
                     .size(20.dp)
-                    .clip(CircleShape)
-                    .background(Ink),
+                    .background(LocalOhagiColors.current.backdrop, CircleShape),
             )
         }
     }
@@ -659,12 +685,11 @@ private fun MiniPreviewCluster(
     miniIconSize: Dp,
 ) {
     val description = stringResource(R.string.category_open, title)
+    // iOS と同じく下地を敷かず、小さいアイコン4つだけを大アイコン1個分の枠に並べる。
     Box(
         contentAlignment = Alignment.Center,
         modifier = Modifier
             .size(size)
-            .clip(RoundedCornerShape(16.dp))
-            .background(Color.Black.copy(alpha = 0.16f))
             .semantics {
                 contentDescription = description
                 role = Role.Button
@@ -679,7 +704,7 @@ private fun MiniPreviewCluster(
             Icon(
                 imageVector = Icons.Rounded.Apps,
                 contentDescription = null,
-                tint = Kome.copy(alpha = 0.70f),
+                tint = GlassSecondaryContentColor,
                 modifier = Modifier.size(28.dp),
             )
         } else {
@@ -707,12 +732,121 @@ private fun MiniPreviewCluster(
 
 internal val APP_LIBRARY_PREVIEW_ICON_SIZE = 66.dp
 internal val FREQUENT_APP_ICON_SIZE = 56.dp
-private val APP_LIBRARY_PREVIEW_ICON_GAP = 10.dp
+private val APP_LIBRARY_PREVIEW_ICON_GAP = 12.dp
 internal val APP_LIBRARY_MINI_ICON_SIZE = 28.dp
-private val APP_LIBRARY_MINI_ICON_GAP = 4.dp
-private val CATEGORY_GRID_HORIZONTAL_PADDING = 12.dp
-private val CATEGORY_GRID_GAP = 12.dp
-private val CATEGORY_CARD_HORIZONTAL_PADDING = 12.dp
+private val APP_LIBRARY_MINI_ICON_GAP = 5.dp
+private val CATEGORY_GRID_HORIZONTAL_PADDING = 20.dp
+private val CATEGORY_GRID_GAP = 16.dp
+private val CATEGORY_GRID_ROW_GAP = 14.dp
+
+/** 正方形カード内で、アイコン群の外側に最低限残す余白。 */
+private val CATEGORY_CARD_MIN_PADDING = 12.dp
+
+/** 大アイコンが上限の APP_LIBRARY_PREVIEW_ICON_SIZE のまま収まる最小のカード幅(168dp)。 */
+private val CATEGORY_CARD_FULL_ICON_WIDTH =
+    APP_LIBRARY_PREVIEW_ICON_SIZE * 2 + APP_LIBRARY_PREVIEW_ICON_GAP + CATEGORY_CARD_MIN_PADDING * 2
+private const val CATEGORY_GRID_MIN_COLUMNS = 2
+private const val CATEGORY_GRID_MAX_COLUMNS = 8
+private const val WIDE_CATEGORY_COLUMNS = 4
+private val AppLibraryCardShape = ContinuousRoundedShape(26.dp)
 private const val FREQUENT_APP_COLUMNS = 4
 
 internal val IOS_SELECTION_BLUE = Color(0xFF0A84FF)
+
+/**
+ * カテゴリーカードの列数。縦画面の端末幅(約360〜550dp)では従来どおり2列で、
+ * それより広い時はカード幅が [CATEGORY_CARD_FULL_ICON_WIDTH] を下回らない最大の列数にする。
+ * これにより3列以上では大アイコンが常に先読みと同じ寸法になる。
+ */
+internal fun appLibraryCategoryColumns(availableWidth: Dp): Int {
+    val contentWidth = availableWidth - CATEGORY_GRID_HORIZONTAL_PADDING * 2
+    val fitting = (
+        (contentWidth + CATEGORY_GRID_GAP) / (CATEGORY_CARD_FULL_ICON_WIDTH + CATEGORY_GRID_GAP)
+        ).toInt()
+    return fitting.coerceIn(CATEGORY_GRID_MIN_COLUMNS, CATEGORY_GRID_MAX_COLUMNS)
+}
+
+private val APP_GRID_GAP = 4.dp
+
+/** 縦画面では4列のまま、横画面など幅に余裕がある時だけ列を増やす。 */
+private class MinCountAdaptiveCells(
+    private val minCount: Int,
+    private val minCellWidth: Dp,
+) : GridCells {
+    override fun Density.calculateCrossAxisCellSizes(availableSize: Int, spacing: Int): List<Int> {
+        val adaptiveCount = (availableSize + spacing) / (minCellWidth.roundToPx() + spacing)
+        val count = maxOf(minCount, adaptiveCount)
+        val usable = (availableSize - spacing * (count - 1)).coerceAtLeast(0)
+        val cellSize = usable / count
+        val remainder = usable % count
+        return List(count) { index -> cellSize + if (index < remainder) 1 else 0 }
+    }
+
+    override fun equals(other: Any?): Boolean =
+        other is MinCountAdaptiveCells &&
+            other.minCount == minCount &&
+            other.minCellWidth == minCellWidth
+
+    override fun hashCode(): Int = 31 * minCount + minCellWidth.hashCode()
+}
+
+/** 約411dp幅の縦画面では4列(1セル約94dp)。横画面の約860dpでは8列になる。 */
+private val AppGridColumns: GridCells = MinCountAdaptiveCells(minCount = 4, minCellWidth = 96.dp)
+
+/**
+ * 検索欄のフォーカスを、ソフトキーボードが閉じられた時(検索文字が空の場合)と
+ * カテゴリーを開いた時に外す。
+ *
+ * フォーカス直後はまだキーボードが出ていないので、「このフォーカス中に一度キーボードが
+ * 出た」後の非表示化だけを閉じる操作とみなす。ソフトキーボードを使わない
+ * ハードウェアキーボード入力ではフォーカスを外さない。
+ * 外すのは検索欄がフォーカスを持っている時だけで、他の入力欄のフォーカスには触れない。
+ */
+@Stable
+internal class SearchFieldFocusReleaser(private val focusManager: FocusManager) {
+    private var focused = false
+    private var imeVisible = false
+    private var imeShownWhileFocused = false
+
+    /** 検索欄の modifier に連結する。 */
+    val modifier: Modifier = Modifier.onFocusChanged { state ->
+        val nowFocused = state.isFocused
+        if (nowFocused != focused) {
+            focused = nowFocused
+            imeShownWhileFocused = nowFocused && imeVisible
+        }
+    }
+
+    /** カテゴリーを開いた時など、検索欄から離れる操作で呼ぶ。 */
+    fun release() {
+        if (focused) focusManager.clearFocus()
+    }
+
+    internal fun onImeOrQueryChanged(imeVisible: Boolean, queryBlank: Boolean) {
+        this.imeVisible = imeVisible
+        if (!focused) return
+        if (imeVisible) {
+            imeShownWhileFocused = true
+        } else if (queryBlank && imeShownWhileFocused) {
+            focusManager.clearFocus()
+        }
+    }
+}
+
+@Composable
+internal fun rememberSearchFieldFocusReleaser(query: String): SearchFieldFocusReleaser {
+    val focusManager = LocalFocusManager.current
+    val releaser = remember(focusManager) { SearchFieldFocusReleaser(focusManager) }
+    SearchFieldImeWatcher(releaser = releaser, queryBlank = query.isBlank())
+    return releaser
+}
+
+/** IME の表示状態はこの小さなスコープだけで読み、切り替わりで呼び出し元を再composeしない。 */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun SearchFieldImeWatcher(releaser: SearchFieldFocusReleaser, queryBlank: Boolean) {
+    val imeVisible = WindowInsets.isImeVisible
+    LaunchedEffect(releaser, imeVisible, queryBlank) {
+        releaser.onImeOrQueryChanged(imeVisible = imeVisible, queryBlank = queryBlank)
+    }
+}

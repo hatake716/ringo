@@ -1,10 +1,6 @@
 package io.github.hatake716.ohagi.ui.common
 
-import androidx.compose.foundation.Image
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
@@ -14,20 +10,25 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.drawOutline
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
 import io.github.hatake716.ohagi.LocalGraph
 import io.github.hatake716.ohagi.data.AppIconRequest
 import io.github.hatake716.ohagi.data.AppRef
+import kotlin.math.roundToInt
 
 /**
  * アプリアイコンを非同期で読み込んで表示する共通コンポーザブル。
- * iPhone 風に角丸(辺長の約 22.37% = superellipse 近似)でマスクして統一感を出す。
+ * iPhone 風に連続曲率の角丸(辺長の約 22.37%)でマスクして統一感を出す。
  * 読み込み中はプレースホルダーの角丸ボックスを表示する。
  */
 @Composable
@@ -49,51 +50,54 @@ fun AppIconImage(
     decorated: Boolean = true,
 ) {
     val iosShape = iosIconShape(size)
+    // マスク・下地・光の縁は Repository 側でビットマップへ焼き込み済み。ここでは
+    // clip/border のレイヤーを作らず、1つのノードでビットマップかプレースホルダーを描く。
+    val content = remember(icon, iosShape) { Modifier.drawAppIcon(icon, iosShape) }
 
     if (!decorated) {
-        if (icon != null) {
-            // Repository側ですでに角丸・Hardware Bitmap化済み。密集プレビューでは
-            // アイコンごとのshadow/clip/borderレイヤーを重ねず、そのまま描画する。
-            Image(
-                bitmap = icon,
-                contentDescription = null,
-                modifier = modifier.size(size),
-            )
-        } else {
-            Box(
-                modifier = modifier
-                    .size(size)
-                    .clip(iosShape)
-                    .background(Color(0x24FFFFFF)),
-            )
-        }
+        // 密集プレビューではアイコンごとの影レイヤーも重ねない。
+        Box(modifier = modifier.size(size).then(content))
         return
     }
 
     Box(
         modifier = modifier
             .size(size)
-            // 影はマスク前に置き、iOSホーム画面の控えめな接地感だけを再現する。
+            // iOSホーム画面の控えめな接地感だけを再現する。
             .shadow(
                 elevation = size * 0.035f,
-                shape = iosShape,
+                shape = iosIconShadowShape(size),
                 clip = false,
                 ambientColor = Color.Black.copy(alpha = 0.22f),
                 spotColor = Color.Black.copy(alpha = 0.28f),
             )
-            .clip(iosShape)
-            .background(Color(0x24FFFFFF))
-            .border(0.5.dp, Color.White.copy(alpha = 0.16f), iosShape),
-    ) {
-        if (icon != null) {
-            Image(
-                bitmap = icon,
-                contentDescription = null,
-                modifier = Modifier.fillMaxSize(),
+            .then(content),
+    )
+}
+
+private fun Modifier.drawAppIcon(icon: ImageBitmap?, shape: Shape): Modifier =
+    if (icon != null) {
+        drawBehind {
+            // 親の制約で枠が正方形にならなくても、縦横比を保って中央に収める。
+            val side = size.minDimension
+            val dst = side.roundToInt()
+            drawImage(
+                image = icon,
+                dstOffset = IntOffset(
+                    ((size.width - side) / 2f).roundToInt(),
+                    ((size.height - side) / 2f).roundToInt(),
+                ),
+                dstSize = IntSize(dst, dst),
             )
         }
+    } else {
+        drawWithCache {
+            val outline = shape.createOutline(size, layoutDirection, this)
+            onDrawBehind { drawOutline(outline, AppIconPlaceholderColor) }
+        }
     }
-}
+
+private val AppIconPlaceholderColor = Color(0x24FFFFFF)
 
 /** AppIcon と drag shadow が同じ非同期アイコン取得経路を共有するための状態。 */
 @Composable

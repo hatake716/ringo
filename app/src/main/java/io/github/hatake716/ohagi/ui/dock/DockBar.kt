@@ -3,22 +3,18 @@ package io.github.hatake716.ohagi.ui.dock
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material3.Icon
@@ -29,17 +25,15 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.layout.boundsInRoot
-import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -49,10 +43,18 @@ import io.github.hatake716.ohagi.data.AppRef
 import io.github.hatake716.ohagi.data.DockItem
 import io.github.hatake716.ohagi.data.LayoutState
 import io.github.hatake716.ohagi.ui.common.AppIconImage
+import io.github.hatake716.ohagi.ui.common.ContinuousRoundedShape
+import io.github.hatake716.ohagi.ui.common.continuousShadowShape
+import io.github.hatake716.ohagi.ui.common.GlassSecondaryContentColor
+import io.github.hatake716.ohagi.ui.common.GlassTone
 import io.github.hatake716.ohagi.ui.common.IosFolderIcon
 import io.github.hatake716.ohagi.ui.common.IosMotion
+import io.github.hatake716.ohagi.ui.common.addContinuousRoundedRect
 import io.github.hatake716.ohagi.ui.common.dockMotionKeys
+import io.github.hatake716.ohagi.ui.common.liquidGlass
 import io.github.hatake716.ohagi.ui.common.rememberIosDragVisualState
+import io.github.hatake716.ohagi.ui.common.rememberLayoutBoundsHolder
+import io.github.hatake716.ohagi.ui.common.trackLayoutBounds
 import io.github.hatake716.ohagi.ui.common.uprightWithDevice
 import io.github.hatake716.ohagi.ui.common.rememberAppIconBitmap
 import io.github.hatake716.ohagi.ui.common.rememberAppIconBitmaps
@@ -60,11 +62,9 @@ import io.github.hatake716.ohagi.ui.dragdrop.DragPayload
 import io.github.hatake716.ohagi.ui.dragdrop.ohagiDragSource
 import io.github.hatake716.ohagi.ui.dragdrop.ohagiDropTarget
 import io.github.hatake716.ohagi.ui.dragdrop.rememberOhagiDropTarget
-import io.github.hatake716.ohagi.ui.theme.Kome
-import io.github.hatake716.ohagi.ui.theme.TileBorder
 
 /**
- * 画面下部に常時表示するドックバー。
+ * 画面下部に常時表示するドックバー。iOS 26/27 の、壁紙の上に浮いたガラス板。
  * 各スロット自身が公式 Compose D&D の source/target になる。
  */
 @Composable
@@ -81,7 +81,7 @@ fun DockBar(
     onDragSessionEnded: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val shape = RoundedCornerShape(30.dp)
+    val shape = DockShape
     val slots = remember(dock) {
         List(LayoutState.DOCK_SLOT_COUNT) { slot -> dock.getOrNull(slot) }
     }
@@ -89,21 +89,16 @@ fun DockBar(
     BoxWithConstraints(
         modifier = modifier
             .fillMaxWidth()
-            .height(84.dp)
+            .height(DOCK_BAR_HEIGHT)
+            // 半透明のガラス越しに影の本体が透けて濁らないよう、影は薄く小さく留める。
             .shadow(
-                elevation = 14.dp,
-                shape = shape,
+                elevation = 10.dp,
+                shape = DockShadowShape,
                 clip = false,
-                ambientColor = Color.Black.copy(alpha = 0.20f),
-                spotColor = Color.Black.copy(alpha = 0.28f),
+                ambientColor = Color.Black.copy(alpha = 0.10f),
+                spotColor = Color.Black.copy(alpha = 0.18f),
             )
-            .clip(shape)
-            .background(
-                Brush.verticalGradient(
-                    listOf(Color(0x8A27222B), Color(0xA317141A)),
-                ),
-            )
-            .border(0.75.dp, TileBorder.copy(alpha = 0.72f), shape),
+            .liquidGlass(shape, GlassTone.Regular),
     ) {
         val slotWidth = (maxWidth - 16.dp) / LayoutState.DOCK_SLOT_COUNT
         LazyRow(
@@ -191,13 +186,15 @@ private fun DockSlot(
         size = FOLDER_PREVIEW_ICON_REQUEST_SIZE,
     )
 
-    var folderTargetBounds by remember { mutableStateOf<Rect?>(null) }
+    // アイコンの矩形はフォルダ化判定とタップの瞬間にだけ求める。
+    val folderTarget = rememberLayoutBoundsHolder()
     val stackCandidate = activeDrag?.let(canStack) == true
-    val hoverColor by animateColorAsState(
+    // 色は描画フェーズでだけ読み、hoverのフェード中にスロットを再composeしない。
+    val hoverColor = animateColorAsState(
         targetValue = when {
             folderReady -> Color.White.copy(alpha = 0.18f)
             dropHovered -> Color.White.copy(alpha = 0.10f)
-            else -> Color.Transparent
+            else -> Color.White.copy(alpha = 0f)
         },
         animationSpec = tween(durationMillis = 120),
         label = "dockDropHover",
@@ -207,7 +204,7 @@ private fun DockSlot(
         onEntered = { dropHovered = true },
         onMoved = { position ->
             folderReady = stackCandidate &&
-                folderTargetBounds?.contains(position) == true
+                folderTarget.boundsInRoot()?.contains(position) == true
             onDragMoved(position)
         },
         onExited = {
@@ -222,7 +219,7 @@ private fun DockSlot(
         onDrop = { dropped, position ->
             dropHovered = false
             val stack = canStack(dropped) &&
-                folderTargetBounds?.contains(position) == true
+                folderTarget.boundsInRoot()?.contains(position) == true
             folderReady = false
             val accepted = onDrop(dropped, position, stack)
             if (accepted) dragVisual.settle(stack)
@@ -242,7 +239,7 @@ private fun DockSlot(
             payload = payload,
             icon = dragIcon,
             folderIcons = folderDragIcons,
-            onTap = { onTap(folderTargetBounds) },
+            onTap = { onTap(folderTarget.boundsInRoot()) },
             onPressChanged = { pressed = it },
             onLift = { haptic.performHapticFeedback(HapticFeedbackType.LongPress) },
             onDragStarted = { onDragSessionStarted(payload) },
@@ -253,8 +250,15 @@ private fun DockSlot(
     Box(
         contentAlignment = Alignment.Center,
         modifier = modifier
-            .clip(RoundedCornerShape(18.dp))
-            .background(hoverColor)
+            .drawWithCache {
+                val hoverPath = Path().apply {
+                    addContinuousRoundedRect(size.width, size.height, DOCK_SLOT_HOVER_RADIUS.toPx())
+                }
+                onDrawBehind {
+                    val color = hoverColor.value
+                    if (color.alpha > 0f) drawPath(hoverPath, color)
+                }
+            }
             .ohagiDropTarget(dropTarget),
     ) {
         Box(
@@ -266,7 +270,7 @@ private fun DockSlot(
                     alpha = dragVisual.alpha
                 }
                 .size(64.dp)
-                .onGloballyPositioned { folderTargetBounds = it.boundsInRoot() }
+                .trackLayoutBounds(folderTarget)
                 .then(sourceModifier)
                 .semantics { contentDescription = description },
         ) {
@@ -286,7 +290,7 @@ private fun DockSlot(
                     null -> Icon(
                         imageVector = Icons.Rounded.Add,
                         contentDescription = null,
-                        tint = Kome.copy(alpha = 0.35f),
+                        tint = GlassSecondaryContentColor.copy(alpha = 0.5f),
                         modifier = Modifier.size(26.dp),
                     )
                 }
@@ -296,5 +300,10 @@ private fun DockSlot(
     }
 }
 
+/** Dock 本体の高さ。ホームのグリッド下余白・検索カプセルの位置はこれを基準に決める。 */
+internal val DOCK_BAR_HEIGHT = 84.dp
+private val DockShape = ContinuousRoundedShape(26.dp)
+private val DockShadowShape = continuousShadowShape(26.dp)
+private val DOCK_SLOT_HOVER_RADIUS = 18.dp
 private val DOCK_ICON_SIZE = 52.dp
 private val FOLDER_PREVIEW_ICON_REQUEST_SIZE = 24.dp

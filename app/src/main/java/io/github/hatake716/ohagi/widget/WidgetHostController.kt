@@ -4,11 +4,15 @@ import android.appwidget.AppWidgetHost
 import android.appwidget.AppWidgetHostView
 import android.appwidget.AppWidgetManager
 import android.appwidget.AppWidgetProviderInfo
+import android.content.BroadcastReceiver
 import android.content.ComponentName
 import android.content.ComponentCallbacks2
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.os.Build
 import android.os.Bundle
+import android.os.LocaleList
 import android.os.Process
 import android.util.Log
 import android.util.SizeF
@@ -18,13 +22,21 @@ import java.util.Collections
 import java.util.IdentityHashMap
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.roundToInt
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.withContext
 
 /** Android標準AppWidgetHostをランチャー全体で1つだけ管理する。 */
 class WidgetHostController(context: Context) {
 
     private val appContext = context.applicationContext
     private val manager = AppWidgetManager.getInstance(appContext)
-    private val host = ReleasableWidgetHost(appContext)
+    // ウィジェットページはページを往復するたびにカードを組み直すため、
+    // getAppWidgetInfo(Binder)と loadLabel を ID ごとに一度だけ行う。
+    // null(未バインド・プロバイダー不在)は保持せず、次回また問い合わせる。
+    private val widgetInfoCache = ConcurrentHashMap<Int, AppWidgetProviderInfo>()
+    private val widgetLabelCache = ConcurrentHashMap<Int, String>()
+    private val host = ReleasableWidgetHost(appContext) { invalidateWidget(it) }
     // Pagerから一度外れた直後の再入場では、まだ生存しているRemoteViewsを再利用する。
     // AppWidgetHost自身も作成済みViewを強参照する。通常のページ往復では
     // ウィジェット内のスクロール位置も維持し、実メモリ圧迫時だけ参照を解放する。
@@ -36,7 +48,20 @@ class WidgetHostController(context: Context) {
     )
     private var releaseWhenUnused = false
 
+    // AppWidgetProviderInfo の寸法は取得時の密度で px 化され、ラベルは言語で変わる。
+    private var cachedDensityDpi = 0
+    private var cachedLocales: LocaleList? = null
+    private var watchingPackages = false
+
+    private val packageReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            val packageName = intent.data?.schemeSpecificPart ?: return
+            invalidatePackage(packageName)
+        }
+    }
+
     fun startListening() {
+        watchPackageChanges()
         runCatching(host::startListening)
             .onFailure { Log.w(TAG, "ウィジェット更新の購読開始に失敗しました", it) }
     }
@@ -46,39 +71,90 @@ class WidgetHostController(context: Context) {
             .onFailure { Log.w(TAG, "ウィジェット更新の購読停止に失敗しました", it) }
     }
 
-    fun allocateAppWidgetId(): Int = host.allocateAppWidgetId()
+    fun allocateAppWidgetId(): Int = host.allocateAppWidgetId().also(::invalidateWidget)
 
     fun deleteAppWidgetId(appWidgetId: Int) {
         reusableViews.remove(appWidgetId)
         lastWidgetSizes.remove(appWidgetId)
+        invalidateWidget(appWidgetId)
         runCatching { host.deleteAppWidgetId(appWidgetId) }
             .onFailure { Log.w(TAG, "ウィジェットIDの削除に失敗しました: $appWidgetId", it) }
     }
 
-    fun appWidgetInfo(appWidgetId: Int): AppWidgetProviderInfo? =
-        manager.getAppWidgetInfo(appWidgetId)
+    /** バインド済みIDのプロバイダー情報。ID ごとにキャッシュする。 */
+    fun appWidgetInfo(appWidgetId: Int): AppWidgetProviderInfo? {
+        dropCachesIfConfigurationChanged()
+        widgetInfoCache[appWidgetId]?.let { return it }
+        val info = runCatching { manager.getAppWidgetInfo(appWidgetId) }
+            .onFailure { Log.w(TAG, "ウィジェット情報の取得に失敗しました: $appWidgetId", it) }
+            .getOrNull()
+            ?: return null
+        widgetInfoCache[appWidgetId] = info
+        return info
+    }
 
+    /** バインド済みIDのウィジェット名。ID ごとにキャッシュする。 */
+    fun widgetLabel(appWidgetId: Int, info: AppWidgetProviderInfo): String {
+        dropCachesIfConfigurationChanged()
+        widgetLabelCache[appWidgetId]?.let { return it }
+        return providerLabel(info).also { widgetLabelCache[appWidgetId] = it }
+    }
+
+    /**
+     * ホーム画面に置けるインストール済みプロバイダー(順序は不定)。
+     * 一覧表示には、ラベル取得と並べ替えをIOスレッドで行う [loadProviderEntries] を使う。
+     */
     fun installedProviders(): List<AppWidgetProviderInfo> =
         manager.getInstalledProvidersForProfile(Process.myUserHandle())
-            .filter { info ->
-                info.widgetCategory == 0 ||
-                    info.widgetCategory and AppWidgetProviderInfo.WIDGET_CATEGORY_HOME_SCREEN != 0
-            }
-            .sortedWith(
-                compareBy<AppWidgetProviderInfo>(
-                    { providerAppLabel(it).lowercase() },
-                    { providerLabel(it).lowercase() },
-                ),
-            )
+            .filter(::isHomeScreenProvider)
 
-    fun providerLabel(info: AppWidgetProviderInfo): String =
+    /**
+     * ウィジェット選択シート用の一覧。列挙・ラベル取得・並べ替えをIOスレッドで行い、
+     * ラベルはプロバイダーごと(アプリ名はパッケージごと)に一度だけ読む。
+     */
+    suspend fun loadProviderEntries(): List<WidgetProviderEntry> = withContext(Dispatchers.IO) {
+        val providers = runCatching {
+            manager.getInstalledProvidersForProfile(Process.myUserHandle())
+        }.onFailure {
+            Log.w(TAG, "ウィジェット一覧の取得に失敗しました", it)
+        }.getOrDefault(emptyList())
+        val appLabels = HashMap<String, String>()
+        providers
+            .filter(::isHomeScreenProvider)
+            .map { info ->
+                ensureActive()
+                val appLabel = appLabels.getOrPut(info.provider.packageName) {
+                    providerAppLabel(info)
+                }
+                val widgetLabel = providerLabel(info)
+                SortableEntry(
+                    entry = WidgetProviderEntry(info, appLabel, widgetLabel),
+                    appKey = appLabel.lowercase(),
+                    widgetKey = widgetLabel.lowercase(),
+                )
+            }
+            .sortedWith(compareBy(SortableEntry::appKey, SortableEntry::widgetKey))
+            .map(SortableEntry::entry)
+    }
+
+    private data class SortableEntry(
+        val entry: WidgetProviderEntry,
+        val appKey: String,
+        val widgetKey: String,
+    )
+
+    private fun isHomeScreenProvider(info: AppWidgetProviderInfo): Boolean =
+        info.widgetCategory == 0 ||
+            info.widgetCategory and AppWidgetProviderInfo.WIDGET_CATEGORY_HOME_SCREEN != 0
+
+    private fun providerLabel(info: AppWidgetProviderInfo): String =
         runCatching { info.loadLabel(appContext.packageManager) }
             .getOrNull()
             ?.toString()
             ?.takeIf(String::isNotBlank)
             ?: info.provider.shortClassName.substringAfterLast('.')
 
-    fun providerAppLabel(info: AppWidgetProviderInfo): String =
+    private fun providerAppLabel(info: AppWidgetProviderInfo): String =
         runCatching {
             val applicationInfo = appContext.packageManager.getApplicationInfo(
                 info.provider.packageName,
@@ -100,7 +176,54 @@ class WidgetHostController(context: Context) {
         )
     }.onFailure {
         Log.w(TAG, "ウィジェットの直接バインドに失敗しました: ${info.provider}", it)
-    }.getOrDefault(false)
+    }.getOrDefault(false).also { invalidateWidget(appWidgetId) }
+
+    private fun invalidateWidget(appWidgetId: Int) {
+        widgetInfoCache.remove(appWidgetId)
+        widgetLabelCache.remove(appWidgetId)
+    }
+
+    private fun invalidatePackage(packageName: String) {
+        widgetInfoCache.forEach { (appWidgetId, info) ->
+            if (info.provider.packageName == packageName) invalidateWidget(appWidgetId)
+        }
+    }
+
+    private fun dropCachesIfConfigurationChanged() {
+        val configuration = appContext.resources.configuration
+        val densityDpi = configuration.densityDpi
+        val locales = configuration.locales
+        if (densityDpi == cachedDensityDpi && locales == cachedLocales) return
+        widgetInfoCache.clear()
+        widgetLabelCache.clear()
+        cachedDensityDpi = densityDpi
+        cachedLocales = locales
+    }
+
+    // onProviderChanged だけでは、購読停止中のアンインストールなどでキャッシュが
+    // 古いまま残る場合があるため、パッケージ変更も直接監視する。
+    private fun watchPackageChanges() {
+        if (watchingPackages) return
+        watchingPackages = true
+        val filter = IntentFilter().apply {
+            addAction(Intent.ACTION_PACKAGE_ADDED)
+            addAction(Intent.ACTION_PACKAGE_REMOVED)
+            addAction(Intent.ACTION_PACKAGE_CHANGED)
+            addAction(Intent.ACTION_PACKAGE_REPLACED)
+            addDataScheme("package")
+        }
+        runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                appContext.registerReceiver(packageReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+            } else {
+                @Suppress("UnspecifiedRegisterReceiverFlag")
+                appContext.registerReceiver(packageReceiver, filter)
+            }
+        }.onFailure {
+            watchingPackages = false
+            Log.w(TAG, "パッケージ変更の監視開始に失敗しました", it)
+        }
+    }
 
     fun createView(
         context: Context,
@@ -150,8 +273,16 @@ class WidgetHostController(context: Context) {
         releaseWhenUnused = false
     }
 
-    private class ReleasableWidgetHost(context: Context) : AppWidgetHost(context, HOST_ID) {
+    private class ReleasableWidgetHost(
+        context: Context,
+        private val onProviderInfoChanged: (appWidgetId: Int) -> Unit,
+    ) : AppWidgetHost(context, HOST_ID) {
         fun releaseViewReferences() = clearViews()
+
+        override fun onProviderChanged(appWidgetId: Int, appWidget: AppWidgetProviderInfo) {
+            super.onProviderChanged(appWidgetId, appWidget)
+            onProviderInfoChanged(appWidgetId)
+        }
     }
 
     @Suppress("DEPRECATION")
@@ -323,4 +454,11 @@ data class WidgetResizeBounds(
     val maxWidthDp: Int,
     val minHeightDp: Int,
     val maxHeightDp: Int,
+)
+
+/** ウィジェット選択シートの1行分。ラベルは読み込み時に確定させておく。 */
+data class WidgetProviderEntry(
+    val info: AppWidgetProviderInfo,
+    val appLabel: String,
+    val widgetLabel: String,
 )
