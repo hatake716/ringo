@@ -74,6 +74,7 @@ sealed interface DragPayload {
     ) : DragPayload
 }
 
+// Keep the existing transfer identifiers when changing the user-facing app name.
 const val OHAGI_DND_MIME = "application/vnd.ohagi.dragitem"
 const val OHAGI_REMOVABLE_DND_MIME = "application/vnd.ohagi.dragitem-removable"
 
@@ -90,7 +91,7 @@ fun DragPayload.toTransferData(): DragAndDropTransferData {
         arrayOf(OHAGI_DND_MIME, OHAGI_REMOVABLE_DND_MIME)
     }
     val clipData = ClipData(
-        "ohagi",
+        "ringo",
         mimeTypes,
         ClipData.Item(encoded),
     )

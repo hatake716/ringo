@@ -20,5 +20,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "ohagi"
+rootProject.name = "ringo"
 include(":app")

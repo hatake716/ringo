@@ -21,7 +21,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
 /**
- * ohagiから通常起動したアプリを1つ目として、通知に選択導線を表示する。
+ * ringoから通常起動したアプリを1つ目として、通知に選択導線を表示する。
  *
  * 通知タップをReceiverやServiceで中継するとAndroid 12以降のnotification trampoline
  * 制限に抵触するため、PendingIntentは非公開のSplitLaunchActivityを直接指す。

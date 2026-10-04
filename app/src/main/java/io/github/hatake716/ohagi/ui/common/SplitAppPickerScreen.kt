@@ -39,7 +39,7 @@ import io.github.hatake716.ohagi.data.AppRef
 import io.github.hatake716.ohagi.data.preferredAppRefs
 import io.github.hatake716.ohagi.ui.theme.LocalOhagiColors
 
-/** 通知のohagiボタンから開く、2つ目のアプリ専用カテゴリー式ドロワー。 */
+/** 通知のringoボタンから開く、2つ目のアプリ専用カテゴリー式ドロワー。 */
 @Composable
 fun SplitAppPickerScreen(
     firstApp: AppRef,

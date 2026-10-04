@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">ohagi</string>
+    <string name="app_name" translatable="false">ringo</string>
 
     <!-- 共通アクション -->
     <string name="action_launch">起動</string>
@@ -80,9 +80,9 @@
     <!-- 通知から2つ目を選ぶ分割起動 -->
     <string name="split_notification_channel_name">画面分割</string>
     <string name="split_notification_channel_description">通常起動したアプリに、2つ目のアプリを追加するための通知</string>
-    <string name="split_notification_title">ohagi</string>
+    <string name="split_notification_title">@string/app_name</string>
     <string name="split_notification_text">%1$sと分割する2つ目のアプリを選択できます</string>
-    <string name="split_notification_action">ohagi</string>
+    <string name="split_notification_action">@string/app_name</string>
 
     <!-- iOS 27 風の外観 -->
     <string name="home_search_pill">検索</string>
